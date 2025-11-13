@@ -188,11 +188,11 @@ public class MixpanelFlutterPlugin implements FlutterPlugin, MethodCallHandler {
         Map<String, Object> mixpanelPropertiesMap =
                 call.<HashMap<String, Object>>argument("mixpanelProperties");
         mixpanelProperties =
-                new JSONObject(mixpanelPropertiesMap == null ? EMPTY_HASHMAP : mixpanelPropertiesMap);
+                new JSONObject(mixpanelPropertiesMap == null ? EMPTY_HASHMAP : new HashMap<>(mixpanelPropertiesMap));
         Map<String, Object> superPropertiesMap =
                 call.<HashMap<String, Object>>argument("superProperties");
         JSONObject superProperties =
-                new JSONObject(superPropertiesMap == null ? EMPTY_HASHMAP : superPropertiesMap);
+                new JSONObject(superPropertiesMap == null ? EMPTY_HASHMAP : new HashMap<>(superPropertiesMap));
         JSONObject superAndMixpanelProperties;
         try {
             superAndMixpanelProperties =
@@ -268,7 +268,7 @@ public class MixpanelFlutterPlugin implements FlutterPlugin, MethodCallHandler {
         Map<String, Object> mapProperties = call.<HashMap<String, Object>>argument("properties");
         JSONObject properties;
         try {
-            properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : mapProperties);
+            properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : new HashMap<>(mapProperties));
             properties = MixpanelFlutterHelper.getMergedProperties(properties, mixpanelProperties);
         } catch (JSONException e) {
             result.error("MixpanelFlutterException", e.getLocalizedMessage(), null);
@@ -282,7 +282,7 @@ public class MixpanelFlutterPlugin implements FlutterPlugin, MethodCallHandler {
         Map<String, Object> mapProperties = call.<HashMap<String, Object>>argument("properties");
         JSONObject properties;
         try {
-            properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : mapProperties);
+            properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : new HashMap<>(mapProperties));
             properties = MixpanelFlutterHelper.getMergedProperties(properties, mixpanelProperties);
         } catch (JSONException e) {
             result.error("MixpanelFlutterException", e.getLocalizedMessage(), null);
@@ -296,7 +296,7 @@ public class MixpanelFlutterPlugin implements FlutterPlugin, MethodCallHandler {
         Map<String, Object> mapProperties = call.<HashMap<String, Object>>argument("properties");
         JSONObject properties;
         try {
-            properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : mapProperties);
+            properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : new HashMap<>(mapProperties));
             properties = MixpanelFlutterHelper.getMergedProperties(properties, mixpanelProperties);
         } catch (JSONException e) {
             result.error("MixpanelFlutterException", e.getLocalizedMessage(), null);
@@ -362,7 +362,7 @@ public class MixpanelFlutterPlugin implements FlutterPlugin, MethodCallHandler {
         Map<String, Object> mapProperties = call.<HashMap<String, Object>>argument("properties");
         JSONObject properties;
         try {
-            properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : mapProperties);
+            properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : new HashMap<>(mapProperties));
             properties = MixpanelFlutterHelper.getMergedProperties(properties, mixpanelProperties);
         } catch (JSONException e) {
             result.error("MixpanelFlutterException", e.getLocalizedMessage(), null);
@@ -382,7 +382,7 @@ public class MixpanelFlutterPlugin implements FlutterPlugin, MethodCallHandler {
         Map<String, Object> mapProperties = call.<HashMap<String, Object>>argument("properties");
         JSONObject properties;
         try {
-            properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : mapProperties);
+            properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : new HashMap<>(mapProperties));
             properties = MixpanelFlutterHelper.getMergedProperties(properties, mixpanelProperties);
         } catch (JSONException e) {
             result.error("MixpanelFlutterException", e.getLocalizedMessage(), null);
@@ -397,7 +397,7 @@ public class MixpanelFlutterPlugin implements FlutterPlugin, MethodCallHandler {
         Map<String, Object> mapProperties = call.<HashMap<String, Object>>argument("properties");
         JSONObject properties;
         try {
-            properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : mapProperties);
+            properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : new HashMap<>(mapProperties));
             properties = MixpanelFlutterHelper.getMergedProperties(properties, mixpanelProperties);
         } catch (JSONException e) {
             result.error("MixpanelFlutterException", e.getLocalizedMessage(), null);
@@ -477,7 +477,7 @@ public class MixpanelFlutterPlugin implements FlutterPlugin, MethodCallHandler {
         String groupKey = call.argument("groupKey");
         Object groupID = call.argument("groupID");
         Map<String, Object> mapProperties = call.<HashMap<String, Object>>argument("properties");
-        JSONObject properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : mapProperties);
+        JSONObject properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : new HashMap<>(mapProperties));
         mixpanel.getGroup(groupKey, groupID).set(properties);
         result.success(null);
     }
@@ -486,7 +486,7 @@ public class MixpanelFlutterPlugin implements FlutterPlugin, MethodCallHandler {
         String groupKey = call.argument("groupKey");
         Object groupID = call.argument("groupID");
         Map<String, Object> mapProperties = call.<HashMap<String, Object>>argument("properties");
-        JSONObject properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : mapProperties);
+        JSONObject properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : new HashMap<>(mapProperties));
         mixpanel.getGroup(groupKey, groupID).setOnce(properties);
         result.success(null);
     }
