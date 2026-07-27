@@ -1,0 +1,475 @@
+# Changelog
+
+## [v2.13.0](https://github.com/mixpanel/mixpanel-flutter/tree/v2.13.0) (2026-07-27)
+
+### Features
+- add trackScreenView and trackScreenLeave public APIs ([#265](https://github.com/mixpanel/mixpanel-flutter/pull/265))
+
+[Full Changelog](https://github.com/mixpanel/mixpanel-flutter/compare/v2.12.0...v2.13.0)
+
+## [v2.12.0](https://github.com/mixpanel/mixpanel-flutter/tree/v2.12.0) (2026-07-17)
+
+### Features
+- Added support to return the fallback reason for the feature flag varient, bumped native iOS and Android SDK versions to latest.  ([#267](https://github.com/mixpanel/mixpanel-flutter/pull/267))
+
+[Full Changelog](https://github.com/mixpanel/mixpanel-flutter/compare/v2.11.0...v2.12.0)
+
+## [v2.11.0](https://github.com/mixpanel/mixpanel-flutter/tree/v2.11.0) (2026-07-10)
+
+### Chores
+- Add prefetchFlags Option ([#259](https://github.com/mixpanel/mixpanel-flutter/pull/259))
+
+[Full Changelog](https://github.com/mixpanel/mixpanel-flutter/compare/v2.10.0...v2.11.0)
+
+## [v2.10.0](https://github.com/mixpanel/mixpanel-flutter/tree/v2.10.0) (2026-06-15)
+
+### Features
+- Add Swift Package Manager (SPM) support ([#235](https://github.com/mixpanel/mixpanel-flutter/pull/235))
+
+[Full Changelog](https://github.com/mixpanel/mixpanel-flutter/compare/v2.9.0...v2.10.0)
+
+## [v2.9.0](https://github.com/mixpanel/mixpanel-flutter/tree/v2.9.0) (2026-06-09)
+
+### Features
+- wire mixpanel_flutter to MixpanelEventBridge ([#249](https://github.com/mixpanel/mixpanel-flutter/pull/249))
+- Add serverURL option for Mixpanel init ([#247](https://github.com/mixpanel/mixpanel-flutter/pull/247))
+- expose serverURL in Mixpanel.init() ([#245](https://github.com/mixpanel/mixpanel-flutter/pull/245))
+
+[Full Changelog](https://github.com/mixpanel/mixpanel-flutter/compare/v2.8.0...v2.9.0)
+
+## [v2.8.0](https://github.com/mixpanel/mixpanel-flutter/tree/v2.8.0) (2026-05-08)
+
+### Enhancements
+
+- Feature Flag Persistence [\#236](https://github.com/mixpanel/mixpanel-flutter/pull/236)
+
+#
+
+## [v2.7.0](https://github.com/mixpanel/mixpanel-flutter/tree/v2.7.0) (2026-04-30)
+
+### Enhancements
+
+- Add `getAllVariants` support for Feature Flags [\#233](https://github.com/mixpanel/mixpanel-flutter/pull/233)
+
+#
+
+## [v2.6.2](https://github.com/mixpanel/mixpanel-flutter/tree/v2.6.2) (2026-04-17)
+
+### Enhancements
+
+- Update Mixpanel Swift SDK to 6.3.0
+
+### Fixes
+
+- Feature Flags proper track() and getVariant() sequential ordering (within Swift SDK)
+
+## [v2.6.1](https://github.com/mixpanel/mixpanel-flutter/tree/v2.6.1) (2026-04-15)
+
+### Enhancements
+
+- Update Mixpanel Android SDK to 8.5.1
+
+### Fixes
+
+- Feature Flags will auto load on inititialization (within Android SDK)
+- Feature Flags first time event track fix (within Android SDK)
+- Feature Flags proper track() and getVariant() sequential ordering (within Android SDK)
+
+
+
+## [v2.6.0](https://github.com/mixpanel/mixpanel-flutter/tree/v2.6.0) (2026-04-09)
+
+### Enhancements
+
+- Add OSX desktop support [\#220](https://github.com/mixpanel/mixpanel-flutter/pull/220)
+- Update Mixpanel Android SDK to 8.5.0
+- Update Mixpanel Swift SDK to 6.2.0
+- `updateContext()` now calls `setContext` on iOS and Android instead of being a no-op [\#210](https://github.com/mixpanel/mixpanel-flutter/pull/210)
+- `loadFlags()` now supported on web via `mixpanel.flags.load_flags()` [\#210](https://github.com/mixpanel/mixpanel-flutter/pull/210)
+- Refactor Mixpanel instance management in iOS Flutter plugin [\#221](https://github.com/mixpanel/mixpanel-flutter/pull/221)
+
+
+#
+
+## [v2.5.0](https://github.com/mixpanel/mixpanel-flutter/tree/v2.5.0) (2026-02-06)
+
+### Enhancements
+
+- Feature Flags Support [\#209](https://github.com/mixpanel/mixpanel-flutter/pull/209)
+
+#
+
+## [v2.4.4](https://github.com/mixpanel/mixpanel-flutter/tree/v2.4.4) (2025-06-03)
+
+### Fixes
+
+- Ensure complex / dynamic values are properly serializable on web [\#197](https://github.com/mixpanel/mixpanel-flutter/pull/197)
+
+#
+
+## [v2.4.3](https://github.com/mixpanel/mixpanel-flutter/tree/v2.4.3) (2025-05-30)
+
+### Fixes
+
+- Move Mixpanel Android Method Channel Initialization back to onAttachedToEngine [\#196](https://github.com/mixpanel/mixpanel-flutter/pull/196)
+
+#
+
+## [v2.4.2](https://github.com/mixpanel/mixpanel-flutter/tree/v2.4.2) (2025-05-30)
+
+### Enhancements
+
+- Bump native libraries to Swift 5.1.0 and Android 8.2.0 [\#194](https://github.com/mixpanel/mixpanel-flutter/pull/194)
+
+### Fixes
+
+- fix: .jsify\(\) error polluting console logs [\#193](https://github.com/mixpanel/mixpanel-flutter/pull/193)
+- Defer MixpanelFlutterPlugin registration and initialization to prevent ANRs [\#191](https://github.com/mixpanel/mixpanel-flutter/pull/191)
+
+#
+
+## [v2.4.1](https://github.com/mixpanel/mixpanel-flutter/tree/v2.4.1) (2025-04-24)
+
+### Fixes
+
+- Bump mixpanel-swift version to 5.0.0 [\#187](https://github.com/mixpanel/mixpanel-flutter/pull/187)
+
+#
+
+## [v2.4.0](https://github.com/mixpanel/mixpanel-flutter/tree/v2.4.0) (2025-04-11)
+
+### Enhancements
+
+- Bump to Swift 4.4.0 and Android 8.0.3 [\#183](https://github.com/mixpanel/mixpanel-flutter/pull/183)
+-  Refactor: Improve type safety in MixpanelFlutterHelper & Remove Plug… [\#181](https://github.com/mixpanel/mixpanel-flutter/pull/181)
+- feat: Add wasm support [\#167](https://github.com/mixpanel/mixpanel-flutter/pull/167)
+
+#
+
+## [v2.3.4](https://github.com/mixpanel/mixpanel-flutter/tree/v2.3.4) (2025-02-20)
+
+### Fixes
+
+- Remove unused PluginRegistry dependency [\#182](https://github.com/mixpanel/mixpanel-flutter/pull/182)
+
+#
+
+## [v2.3.3](https://github.com/mixpanel/mixpanel-flutter/tree/v2.3.3) (2024-09-25)
+
+### Fixes
+
+- revert minsdk [\#166](https://github.com/mixpanel/mixpanel-flutter/pull/166)
+- revert android [\#165](https://github.com/mixpanel/mixpanel-flutter/pull/165)
+
+#
+
+## [v2.3.2](https://github.com/mixpanel/mixpanel-flutter/tree/v2.3.2) (2024-09-10)
+
+### Enhancements
+
+- upgrade iOS SDK to 4.3.0 [\#162](https://github.com/mixpanel/mixpanel-flutter/pull/162)
+- Upgrade minSDK to 23 [\#161](https://github.com/mixpanel/mixpanel-flutter/pull/161)
+- Fix: Resolve compilation issues in SDK and main.dart [\#160](https://github.com/mixpanel/mixpanel-flutter/pull/160)
+- Lower js constraint to allow 0.6.x [\#142](https://github.com/mixpanel/mixpanel-flutter/pull/142)
+
+#
+
+## [v2.3.1](https://github.com/mixpanel/mixpanel-flutter/tree/v2.3.1) (2024-04-09)
+
+### Enhancements
+
+- bump iOS to 4.2.5 and Android to 7.5.0 [\#141](https://github.com/mixpanel/mixpanel-flutter/pull/141)
+
+#
+
+## [v2.3.0](https://github.com/mixpanel/mixpanel-flutter/tree/v2.3.0) (2024-03-25)
+
+### Enhancements
+
+- Update AGP to 8 and update all dependencies [\#139](https://github.com/mixpanel/mixpanel-flutter/pull/139)
+- upgrade js to 0.7.1 [\#138](https://github.com/mixpanel/mixpanel-flutter/pull/138)
+- Add Future return in some methods [\#136](https://github.com/mixpanel/mixpanel-flutter/pull/136)
+
+#
+
+## [v2.2.0](https://github.com/mixpanel/mixpanel-flutter/tree/v2.2.0) (2023-11-17)
+
+### Enhancements
+
+- add api: setFlushBatchSize [\#102](https://github.com/mixpanel/mixpanel-flutter/pull/122)
+```
+  /// Set the number of events sent in a single network request to the Mixpanel server.
+  /// By configuring this value, you can optimize network usage and manage the frequency of communication between the client
+  /// and the server. The maximum size is 50; any value over 50 will default to 50.
+  /// * [flushBatchSize] an int representing the number of events sent in a single network request.
+  void setFlushBatchSize(int flushBatchSize) {
+    _channel.invokeMethod<void>('setFlushBatchSize',
+        <String, dynamic>{'flushBatchSize': flushBatchSize});
+  }
+```
+- bump iOS to `4.2.0`
+
+#
+
+## [v2.1.1](https://github.com/mixpanel/mixpanel-flutter/tree/v2.1.1) (2023-03-23)
+
+### Enhancements
+
+- bump iOS version to 4.1.0 [\#102](https://github.com/mixpanel/mixpanel-flutter/pull/102)
+
+#
+
+## [v2.1.0](https://github.com/mixpanel/mixpanel-flutter/tree/v2.1.0) (2023-03-06)
+
+### NOTE:
+- From this version we will prefix randomly generated device-specific distinct_ids with "$device:". The prefix is applied the next time a new random ID is generated, any IDs generated by previous SDK versions and  persisted on the device will continue to be used as-is until reset is called to generate a new ID. This does not change the value sent for the $device_id property, which will continue to be the randomly-generated ID without a prefix. Mixpanel's $identify endpoint has been updated to accept UUIDs with this prefix to coordinate with this change.
+
+### Enhancements
+
+- bump ios to 4.0.5 and android to 7.3.0 [\#99](https://github.com/mixpanel/mixpanel-flutter/pull/99)
+
+#
+
+## [v2.0.0](https://github.com/mixpanel/mixpanel-flutter/tree/v2.0.0) (2022-09-09)
+
+### BREAKING CHANGE: 
+This major release removes all remaining calls to Mixpanel's `/decide` API endpoint. The main effect of this is that the SDK no longer fetches the remote status of your [project's "Automatically collect common mobile events" setting](https://help.mixpanel.com/hc/en-us/articles/115004596186#enable-or-disable-common-mobile-events). From this version forward, automatic event tracking can only be controlled by the, now required, parameter `trackAutomaticEvents`. Upon upgrading, existing implementations will need to add this parameter to their Mixpanel initializer calls. 
+
+```
+import 'package:mixpanel_flutter/mixpanel_flutter.dart';
+
+class MixpanelManager {
+  static Mixpanel? _instance;
+
+  static Future<Mixpanel> init() async {
+    if (_instance == null) {
+      _instance = await Mixpanel.init("YOUR_PROJECT_TOKEN", trackAutomaticEvents: true);
+    }
+    return _instance!;
+  }
+}
+
+```
+
+### Enhancements
+
+- add param 'trackAutomaticEvents' to 'init' [\#86](https://github.com/mixpanel/mixpanel-flutter/pull/86)
+
+#
+
+## [v1.6.0](https://github.com/mixpanel/mixpanel-flutter/tree/v1.6.0) (2022-06-24)
+
+### Enhancements
+
+- bump versions to get millisecond precision for event time property [\#82](https://github.com/mixpanel/mixpanel-flutter/pull/82)
+
+#
+
+## [v1.5.1](https://github.com/mixpanel/mixpanel-flutter/tree/v1.5.1) (2022-05-20)
+
+### Enhancements
+
+- bump versions to remove survey [\#79](https://github.com/mixpanel/mixpanel-flutter/pull/79)
+
+#
+
+## [v1.5.0](https://github.com/mixpanel/mixpanel-flutter/tree/v1.5.0) (2022-05-09)
+
+### Enhancements
+
+- add config for web init and setServerURL for web [\#75](https://github.com/mixpanel/mixpanel-flutter/pull/75)
+- feat: support `DateTime` and `Uri` [\#66](https://github.com/mixpanel/mixpanel-flutter/pull/66)
+- fix: Make `flush` method asynchronous [\#64](https://github.com/mixpanel/mixpanel-flutter/pull/64)
+
+#
+
+## [v1.4.8](https://github.com/mixpanel/mixpanel-flutter/tree/v1.4.8) (2022-05-06)
+
+#
+
+## [v1.4.7](https://github.com/mixpanel/mixpanel-flutter/tree/v1.4.7) (2022-05-06)
+
+#
+
+## [v1.4.6](https://github.com/mixpanel/mixpanel-flutter/tree/v1.4.6) (2022-04-11)
+
+### Enhancements
+
+- bump iOS SDK version to 3.1.7 and Android to 6.1.1 [\#69](https://github.com/mixpanel/mixpanel-flutter/pull/69)
+
+### Fixes
+
+- Registering non-string super props in init fails [\#51](https://github.com/mixpanel/mixpanel-flutter/issues/51)
+
+#
+
+## [v1.4.5](https://github.com/mixpanel/mixpanel-flutter/tree/v1.4.5) (2022-02-11)
+
+### Enhancements
+
+- bump iOS SDK version to 3.1.4 [\#61](https://github.com/mixpanel/mixpanel-flutter/pull/61)
+
+### Fixes
+
+- Fix registering non-string super props in init fails [\#62](https://github.com/mixpanel/mixpanel-flutter/pull/62)
+- Fix several misspellings of "Mixpanel" [\#60](https://github.com/mixpanel/mixpanel-flutter/pull/60)
+- Fix backward ordering of 'alias\(\)' parameters on Android. [\#58](https://github.com/mixpanel/mixpanel-flutter/pull/58)
+
+#
+
+## [v1.4.4](https://github.com/mixpanel/mixpanel-flutter/tree/v1.4.4) (2022-01-26)
+
+### Fixes
+
+- Bump iOS SDK depedency to v3.1.2 [\#52](https://github.com/mixpanel/mixpanel-flutter/pull/52)
+
+#
+
+## [v1.4.3](https://github.com/mixpanel/mixpanel-flutter/tree/v1.4.3) (2022-01-19)
+## Caution: Please DO NOT use this build! In this version, we have a bug in iOS that event names with & or % will be rejected by the server. We recommend you update to 1.4.4 or above.
+
+### Fixes
+
+- Now First App Open will display 'flutter' as property value for 'Mixpanel Library'  in iOS [\#49](https://github.com/mixpanel/mixpanel-flutter/pull/49)
+
+#
+
+## [v1.4.2](https://github.com/mixpanel/mixpanel-flutter/tree/v1.4.2) (2022-01-05)
+
+
+**Merged pull requests:**
+
+- bump Mixpanel native SDK version to iOS 3.0.0, Android 6.0.0 [\#46](https://github.com/mixpanel/mixpanel-flutter/pull/44)
+- register super properties on Mixpanel.init for iOS [\#46](https://github.com/mixpanel/mixpanel-flutter/pull/46)
+- fix nested dictionary not being able to tracked properly in iOS [\#43](https://github.com/mixpanel/mixpanel-flutter/pull/43)
+
+#
+
+## [v1.4.1](https://github.com/mixpanel/mixpanel-flutter/tree/v1.4.1) (2021-12-04)
+
+**Merged pull requests:**
+
+- Some lint fixes [\#40](https://github.com/mixpanel/mixpanel-flutter/pull/40)
+
+#
+
+## [v1.4.0](https://github.com/mixpanel/mixpanel-flutter/tree/v1.4.0) (2021-12-02)
+
+### Enhancements
+
+- Add web support [\#35](https://github.com/mixpanel/mixpanel-flutter/pull/35)
+Please add the following snippet to your web/index.html inside <head></head> in your Flutter project.
+
+<script src="./assets/packages/mixpanel_flutter/assets/mixpanel.js"></script>
+
+#
+
+## [v1.3.1](https://github.com/mixpanel/mixpanel-flutter/tree/v1.3.1) (2021-09-25)
+
+### Enhancements
+
+- Migrate from JCenter [\#22](https://github.com/mixpanel/mixpanel-flutter/issues/22)
+
+**Merged pull requests:**
+
+- Bump native SDK dependencies [\#29](https://github.com/mixpanel/mixpanel-flutter/pull/29)
+
+#
+
+## [v1.3.0](https://github.com/mixpanel/mixpanel-flutter/tree/v1.3.0) (2021-09-21)
+
+### Enhancements
+
+- change the name 'properties' to 'superProperties' in init [\#28](https://github.com/mixpanel/mixpanel-flutter/pull/28)
+- Add superProperties on initialize [\#14](https://github.com/mixpanel/mixpanel-flutter/pull/14)
+
+**Merged pull requests:**
+
+- Remove jCenter [\#24](https://github.com/mixpanel/mixpanel-flutter/pull/24)
+
+#
+
+## [v1.2.1](https://github.com/mixpanel/mixpanel-flutter/tree/v1.2.1) (2021-07-19)
+
+### Fixes
+
+- Fix the bool value being tracked as Int [\#21](https://github.com/mixpanel/mixpanel-flutter/pull/21)
+
+#
+
+## [v1.2.0](https://github.com/mixpanel/mixpanel-flutter/tree/v1.2.0) (2021-07-01)
+
+### Enhancements
+
+- Add API `setUseIpAddressForGeolocation` [\#18](https://github.com/mixpanel/mixpanel-flutter/pull/18)
+
+## 1.1.0
+* Add support for Null Safety! Thanks @incendial for contributing a PR for this. 🙏
+
+## 1.0.1
+* Improve docs
+
+## 1.0.0
+* 🚀 This is our first release!  🎉🎉🎉
+    Report issues or give us any feedback is appreciated!
+* [integration guide](https://developer.mixpanel.com/docs/flutter)
+* [full API reference](https://mixpanel.github.io/mixpanel-flutter)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,1462 @@
+import 'dart:async';
+import 'dart:developer' as developer;
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/services.dart';
+import 'package:mixpanel_flutter/codec/mixpanel_message_codec.dart';
+import 'package:mixpanel_flutter/src/version.dart';
+import 'package:mixpanel_flutter_common/mixpanel_flutter_common.dart';
+
+/// Describes why the SDK returned a fallback variant.
+///
+/// - [FallbackReason.notReady]: Flags haven't finished loading yet.
+/// - [FallbackReason.flagNotFound]: The requested flag key is absent from
+///   loaded data.
+/// - [FallbackReason.backendError]: Network fetch failed with no cached or
+///   persisted flags available.
+enum FallbackReason {
+  notReady,
+  flagNotFound,
+  backendError,
+}
+
+/// Identifies where a served [MixpanelFlagVariant] came from. Non-null on
+/// every variant the SDK returns:
+/// - [NetworkSource]: the variant was assigned by the most recent successful
+///   `/flags/` network response.
+/// - [PersistenceSource]: the variant was loaded from the on-disk persistence
+///   layer; [PersistenceSource.persistedAt] is when the variant set was
+///   originally written.
+/// - [FallbackSource]: the SDK could not produce a real variant and returned
+///   the developer-supplied fallback unchanged. [FallbackSource.reason]
+///   indicates why (not ready, flag not found, or backend error). Variants
+///   the developer constructs directly also default to this source, since the
+///   only reason to build one is to pass it as a fallback.
+///
+/// The persistence timestamp lives only on [PersistenceSource] so invalid
+/// combinations like "network with a timestamp" are unrepresentable.
+abstract class MixpanelFlagVariantSource {
+  const MixpanelFlagVariantSource();
+
+  const factory MixpanelFlagVariantSource.network() = NetworkSource;
+  factory MixpanelFlagVariantSource.persistence(
+      {required DateTime persistedAt}) = PersistenceSource;
+  const factory MixpanelFlagVariantSource.fallback(
+      {FallbackReason reason}) = FallbackSource;
+
+  /// Decodes a source map produced by the platform handlers. Falls back to
+  /// [FallbackSource] for missing, malformed, or unrecognized payloads.
+  static MixpanelFlagVariantSource fromMap(Map<dynamic, dynamic>? map) {
+    if (map == null) return const FallbackSource();
+    final kind = map['kind'];
+    if (kind == 'network') return const NetworkSource();
+    if (kind == 'fallback') {
+      final reasonStr = map['reason'] as String?;
+      return FallbackSource(reason: _parseFallbackReason(reasonStr));
+    }
+    if (kind == 'persistence') {
+      final raw = map['persistedAtMillis'];
+      final millis = raw is int ? raw : (raw is num ? raw.toInt() : null);
+      if (millis == null) {
+        developer.log(
+            '`MixpanelFlagVariantSource.fromMap` received persistence source with missing persistedAtMillis, defaulting to fallback',
+            name: 'Mixpanel');
+        return const FallbackSource();
+      }
+      return PersistenceSource(
+          persistedAt: DateTime.fromMillisecondsSinceEpoch(millis));
+    }
+    return const FallbackSource();
+  }
+
+  /// Parses a fallback reason string from the platform handlers.
+  /// Returns [FallbackReason.flagNotFound] as a safe default for
+  /// unrecognized or missing values.
+  static FallbackReason _parseFallbackReason(String? reasonStr) {
+    switch (reasonStr) {
+      case 'notReady':
+        return FallbackReason.notReady;
+      case 'flagNotFound':
+        return FallbackReason.flagNotFound;
+      case 'backendError':
+        return FallbackReason.backendError;
+      default:
+        return FallbackReason.flagNotFound;
+    }
+  }
+}
+
+/// The variant came from a fresh `/flags/` network response.
+class NetworkSource extends MixpanelFlagVariantSource {
+  const NetworkSource();
+
+  @override
+  String toString() => 'NetworkSource()';
+
+  @override
+  bool operator ==(Object other) => other is NetworkSource;
+
+  @override
+  int get hashCode => 0x4e57; // arbitrary stable constant for the singleton-ish case
+}
+
+/// The variant was loaded from the on-disk persistence layer.
+class PersistenceSource extends MixpanelFlagVariantSource {
+  /// Time the variant set was originally written to disk.
+  final DateTime persistedAt;
+
+  PersistenceSource({required this.persistedAt});
+
+  @override
+  String toString() => 'PersistenceSource(persistedAt: $persistedAt)';
+
+  @override
+  bool operator ==(Object other) =>
+      other is PersistenceSource && other.persistedAt == persistedAt;
+
+  @override
+  int get hashCode => persistedAt.hashCode;
+}
+
+/// The SDK returned the developer-supplied fallback unchanged.
+class FallbackSource extends MixpanelFlagVariantSource {
+  /// Why the SDK returned the fallback instead of a real variant.
+  final FallbackReason reason;
+
+  const FallbackSource({this.reason = FallbackReason.flagNotFound});
+
+  @override
+  String toString() => 'FallbackSource(reason: $reason)';
+
+  @override
+  bool operator ==(Object other) =>
+      other is FallbackSource && other.reason == reason;
+
+  @override
+  int get hashCode => reason.hashCode;
+}
+
+/// Represents a feature flag variant with metadata.
+///
+/// Contains the flag's key, value, and optional experiment-related metadata.
+class MixpanelFlagVariant {
+  /// The key/name of the feature flag.
+  final String key;
+
+  /// The value of the feature flag variant.
+  /// Can be any type: bool, String, int, double, Map, List, etc.
+  final dynamic value;
+
+  /// The experiment ID if this flag is part of an experiment.
+  final String? experimentId;
+
+  /// Whether the experiment is currently active.
+  final bool? isExperimentActive;
+
+  /// Whether the current user is a QA tester.
+  final bool? isQaTester;
+
+  /// Where this variant was sourced from. Non-null on every variant the SDK
+  /// returns. Variants the developer constructs default to [FallbackSource],
+  /// since the only reason to build one is to pass it as a fallback.
+  ///
+  /// Use `is` checks to distinguish:
+  ///
+  /// ```dart
+  /// final src = variant.source;
+  /// if (src is PersistenceSource) {
+  ///   print('persisted at ${src.persistedAt}');
+  /// } else if (src is NetworkSource) {
+  ///   print('fresh from /flags/');
+  /// } else if (src is FallbackSource) {
+  ///   print('developer-supplied fallback');
+  /// }
+  /// ```
+  final MixpanelFlagVariantSource source;
+
+  MixpanelFlagVariant({
+    required this.key,
+    required this.value,
+    this.experimentId,
+    this.isExperimentActive,
+    this.isQaTester,
+    this.source = const FallbackSource(),
+  });
+
+  /// Creates a MixpanelFlagVariant from a Map (used for platform channel deserialization).
+  factory MixpanelFlagVariant.fromMap(Map<dynamic, dynamic> map) {
+    final key = map['key'] as String?;
+    if (key == null || key.isEmpty) {
+      developer.log(
+          '`MixpanelFlagVariant.fromMap` received map with missing or empty key, using empty string as default',
+          name: 'Mixpanel');
+    }
+    return MixpanelFlagVariant(
+      key: key ?? '',
+      value: map['value'],
+      experimentId: map['experimentId'] as String?,
+      isExperimentActive: map['isExperimentActive'] as bool?,
+      isQaTester: map['isQaTester'] as bool?,
+      source: MixpanelFlagVariantSource.fromMap(
+          map['source'] as Map<dynamic, dynamic>?),
+    );
+  }
+
+  /// Creates a fallback MixpanelFlagVariant with the given key and value.
+  factory MixpanelFlagVariant.fallback(String key, dynamic value) {
+    return MixpanelFlagVariant(key: key, value: value);
+  }
+
+  /// Converts this variant to a Map for serialization.
+  ///
+  /// Note: [source] is intentionally not serialized — it's a server/SDK-stamped
+  /// field, never set by callers, and the platform handlers don't consume it
+  /// from inbound fallbacks.
+  Map<String, dynamic> toMap() {
+    return {
+      'key': key,
+      'value': value,
+      'experimentId': experimentId,
+      'isExperimentActive': isExperimentActive,
+      'isQaTester': isQaTester,
+    };
+  }
+
+  @override
+  String toString() {
+    return 'MixpanelFlagVariant(key: $key, value: $value, experimentId: $experimentId, isExperimentActive: $isExperimentActive, isQaTester: $isQaTester, source: $source)';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! MixpanelFlagVariant) return false;
+    return key == other.key &&
+        value == other.value &&
+        experimentId == other.experimentId &&
+        isExperimentActive == other.isExperimentActive &&
+        isQaTester == other.isQaTester &&
+        source == other.source;
+  }
+
+  @override
+  int get hashCode {
+    // Use a compatible hash implementation for SDK >=2.12.0
+    var result = 17;
+    result = 37 * result + key.hashCode;
+    result = 37 * result + (value?.hashCode ?? 0);
+    result = 37 * result + (experimentId?.hashCode ?? 0);
+    result = 37 * result + (isExperimentActive?.hashCode ?? 0);
+    result = 37 * result + (isQaTester?.hashCode ?? 0);
+    result = 37 * result + source.hashCode;
+    return result;
+  }
+}
+
+/// Strategy for resolving feature flag variants relative to the on-disk
+/// persistence layer and the network. Pass to
+/// [FeatureFlagsConfig.variantLookupPolicy] at init.
+///
+/// - [VariantLookupPolicy.networkOnly] (default): no persistence; variant
+///   lookups always wait for the network call. Any stale data from a prior
+///   session that used a persisting policy is wiped on init.
+/// - [VariantLookupPolicy.persistenceUntilNetworkSuccess]: serve persisted
+///   variants immediately on init (within
+///   [PersistenceUntilNetworkSuccessPolicy.persistenceTtl]), refresh from the
+///   network in the background.
+/// - [VariantLookupPolicy.networkFirst]: await the network call; only fall
+///   back to persisted variants (within [NetworkFirstPolicy.persistenceTtl])
+///   if the network call fails.
+///
+/// Inspect [MixpanelFlagVariant.source] on a served variant to tell whether
+/// it came from persistence or a fresh network response.
+abstract class VariantLookupPolicy {
+  const VariantLookupPolicy();
+
+  /// No persistence. Variant lookups always wait for the network call.
+  /// Wipes any stale on-disk data from a prior session on init.
+  const factory VariantLookupPolicy.networkOnly() = NetworkOnlyPolicy;
+
+  /// Serve persisted variants immediately on init (within [persistenceTtl]),
+  /// then refresh from the network in the background.
+  ///
+  /// **Web:** not yet supported by the Mixpanel JS SDK at the time of this
+  /// release. On web this policy is silently treated as [networkOnly] until
+  /// JS SDK support ships. Check the Mixpanel JS docs for availability.
+  const factory VariantLookupPolicy.persistenceUntilNetworkSuccess(
+      {Duration persistenceTtl}) = PersistenceUntilNetworkSuccessPolicy;
+
+  /// Await the network call; fall back to persisted variants (within
+  /// [persistenceTtl]) only on network failure.
+  ///
+  /// **Web:** not yet supported by the Mixpanel JS SDK at the time of this
+  /// release. On web this policy is silently treated as [networkOnly] until
+  /// JS SDK support ships. Check the Mixpanel JS docs for availability.
+  const factory VariantLookupPolicy.networkFirst({Duration persistenceTtl}) =
+      NetworkFirstPolicy;
+
+  /// Serializes this policy for the platform channel.
+  Map<String, dynamic> toMap();
+}
+
+/// Policy: never read or write the on-disk persistence layer. Default behavior.
+class NetworkOnlyPolicy extends VariantLookupPolicy {
+  const NetworkOnlyPolicy();
+
+  @override
+  Map<String, dynamic> toMap() => const {'policy': 'networkOnly'};
+}
+
+/// Policy: serve persisted variants immediately, refresh in the background.
+class PersistenceUntilNetworkSuccessPolicy extends VariantLookupPolicy {
+  /// Maximum age of a persisted variant set before it is ignored on read.
+  /// Defaults to 24 hours.
+  final Duration persistenceTtl;
+
+  const PersistenceUntilNetworkSuccessPolicy(
+      {this.persistenceTtl = const Duration(hours: 24)});
+
+  @override
+  Map<String, dynamic> toMap() => {
+        'policy': 'persistenceUntilNetworkSuccess',
+        'persistenceTtlMillis': persistenceTtl.inMilliseconds,
+      };
+}
+
+/// Policy: prefer fresh network values, fall back to persistence only on failure.
+class NetworkFirstPolicy extends VariantLookupPolicy {
+  /// Maximum age of a persisted variant set before it is ignored on read.
+  /// Defaults to 24 hours.
+  final Duration persistenceTtl;
+
+  const NetworkFirstPolicy({this.persistenceTtl = const Duration(hours: 24)});
+
+  @override
+  Map<String, dynamic> toMap() => {
+        'policy': 'networkFirst',
+        'persistenceTtlMillis': persistenceTtl.inMilliseconds,
+      };
+}
+
+/// Configuration options for feature flags.
+///
+/// Used to configure feature flags during Mixpanel initialization.
+class FeatureFlagsConfig {
+  /// Whether feature flags are enabled.
+  final bool enabled;
+
+  /// Context properties to send with feature flag requests.
+  /// These can be used for targeting and segmentation.
+  final Map<String, dynamic> context;
+
+  /// Strategy for resolving variants relative to the on-disk cache and
+  /// network. Defaults to [VariantLookupPolicy.networkOnly] — matches the
+  /// native SDK defaults and pre-persistence behavior.
+  final VariantLookupPolicy variantLookupPolicy;
+
+  /// Whether to eagerly fetch flags during initialization.
+  /// When `true` (default), the SDK automatically calls `loadFlags()` during
+  /// initialization so flags are ready (or close to ready) when accessed.
+  /// When `false`, flags are fetched lazily on first access or manually via
+  /// `loadFlags()` or `identify()`.
+  ///
+  /// Setting this to `false` is useful when you want to defer the initial
+  /// fetch until after calling `identify()` to ensure flags evaluate against
+  /// the correct user identity.
+  final bool prefetchFlags;
+
+  const FeatureFlagsConfig({
+    this.enabled = true,
+    this.context = const {},
+    this.variantLookupPolicy = const VariantLookupPolicy.networkOnly(),
+    this.prefetchFlags = true,
+  });
+
+  /// Converts this config to a Map for serialization.
+  Map<String, dynamic> toMap() {
+    return {
+      'enabled': enabled,
+      'context': context,
+      'variantLookupPolicy': variantLookupPolicy.toMap(),
+      'prefetchFlags': prefetchFlags,
+    };
+  }
+}
+
+/// The primary class for integrating Mixpanel with your app.
+class Mixpanel {
+  // ignore: prefer_const_declarations
+  static final MethodChannel _channel = kIsWeb
+      ? const MethodChannel('mixpanel_flutter')
+      : const MethodChannel(
+          'mixpanel_flutter', StandardMethodCodec(MixpanelMessageCodec()));
+  static final Map<String, String> _mixpanelProperties = {
+    '\$lib_version': sdkVersion,
+    'mp_lib': 'flutter',
+  };
+
+  // Wires the reverse path from the native MixpanelEventBridge into the
+  // Dart-side [MixpanelEventBridge]. Runs only when a consumer actually
+  // reads [MixpanelEventBridge.events] — `init()` registers this as a
+  // one-shot hook via [MixpanelEventBridge.setSourceWiringHook], so apps
+  // that never subscribe never install the MethodCallHandler and never
+  // issue start/stopEventBridge over the channel.
+  static void _wireEventBridge() {
+    _channel.setMethodCallHandler((MethodCall call) async {
+      if (call.method == 'onMixpanelEvent') {
+        final args = (call.arguments as Map?)?.cast<String, Object?>();
+        final eventName = args?['eventName'] as String?;
+        final properties =
+            (args?['properties'] as Map?)?.cast<String, Object?>();
+        if (eventName != null) {
+          // mixpanel_flutter is the privileged producer for this bridge —
+          // acknowledged use of the @internal API on the common package.
+          // ignore: invalid_use_of_internal_member
+          MixpanelEventBridge.notifyListeners(
+            eventName: eventName,
+            properties: properties,
+          );
+        }
+        return null;
+      }
+      // Surface unknown inbound methods loudly rather than silently
+      // returning null — protects future native→Dart push features added
+      // on this same shared channel from being swallowed here.
+      throw MissingPluginException(
+        'No handler for inbound method ${call.method} on mixpanel_flutter channel',
+      );
+    });
+    // ignore: invalid_use_of_internal_member
+    MixpanelEventBridge.setLifecycleCallbacks(
+      // Swallow channel errors (e.g. MissingPluginException during engine
+      // teardown) — the activate/deactivate signal is best-effort.
+      onActivate: () =>
+          _channel.invokeMethod<void>('startEventBridge').catchError((_) {}),
+      onDeactivate: () =>
+          _channel.invokeMethod<void>('stopEventBridge').catchError((_) {}),
+    );
+  }
+
+  final String _token;
+  final People _people;
+  final FeatureFlags _featureFlags;
+  Autocapture? _autocapture;
+
+  Mixpanel(String token)
+      : _token = token,
+        _people = People(token),
+        _featureFlags = FeatureFlags(token);
+
+  ///
+  ///  Initializes an instance of the API with the given project token.
+  ///
+  ///  * [token] your project token.
+  ///  * [optOutTrackingDefault] Optional Whether or not Mixpanel can start tracking by default. See
+  ///  optOutTracking()
+  ///  * [trackAutomaticEvents] Required Whether or not to collect common mobile events
+  ///  include app sessions, first app opens, app updated, etc.
+  ///  * [superProperties] Optional super properties to register
+  ///  * [config] Optional A dictionary of config options to override (WEB ONLY)
+  ///  * [featureFlags] Optional Feature flags configuration
+  ///  * [serverURL] Optional base URL for Mixpanel API requests. Use for EU/India data
+  ///  residency or a custom proxy. Defaults to https://api.mixpanel.com
+  ///
+  static Future<Mixpanel> init(String token,
+      {bool optOutTrackingDefault = false,
+      required bool trackAutomaticEvents,
+      Map<String, dynamic>? superProperties,
+      Map<String, dynamic>? config,
+      FeatureFlagsConfig? featureFlags,
+      String? serverURL}) async {
+    // Defer the reverse-channel wiring until something actually reads
+    // MixpanelEventBridge.events. Apps that never subscribe pay only the
+    // stored function reference — no MethodCallHandler, no native subscribe.
+    // Web is skipped — the JS SDK has no EventBridge.
+    if (!kIsWeb) {
+      // ignore: invalid_use_of_internal_member
+      MixpanelEventBridge.setSourceWiringHook(_wireEventBridge);
+    }
+    var allProperties = <String, dynamic>{'token': token};
+    allProperties['optOutTrackingDefault'] = optOutTrackingDefault;
+    allProperties['trackAutomaticEvents'] = trackAutomaticEvents;
+    allProperties['mixpanelProperties'] = _mixpanelProperties;
+    allProperties['superProperties'] = _MixpanelHelper.ensureSerializableProperties(superProperties);
+    allProperties['config'] = _MixpanelHelper.ensureSerializableProperties(config);
+    if (featureFlags != null) {
+      allProperties['featureFlags'] = featureFlags.toMap();
+    }
+    if (serverURL != null && _MixpanelHelper.isValidString(serverURL)) {
+      allProperties['serverURL'] = serverURL;
+    }
+    await _channel.invokeMethod<void>('initialize', allProperties);
+    return Mixpanel(token);
+  }
+
+  /// Set the base URL used for Mixpanel API requests.
+  /// Useful if you need to proxy Mixpanel requests. Defaults to https://api.mixpanel.com.
+  /// To route data to Mixpanel's EU servers, set to https://api-eu.mixpanel.com
+  ///
+  /// * [serverURL] the base URL used for Mixpanel API requests
+  void setServerURL(String serverURL) {
+    if (_MixpanelHelper.isValidString(serverURL)) {
+      _channel.invokeMethod<void>(
+          'setServerURL', <String, dynamic>{'serverURL': serverURL});
+    } else {
+      developer.log('`setServerURL` failed: serverURL cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// This allows enabling or disabling of all Mixpanel logs at run time.
+  /// All logging is disabled by default. Usually, this is only required if
+  /// you are running into issues with the SDK that you want to debug
+  ///
+  /// * [loggingEnabled] whether to enable logging
+  void setLoggingEnabled(bool loggingEnabled) {
+    // ignore: unnecessary_null_comparison
+    if (loggingEnabled != null) {
+      _channel.invokeMethod<void>('setLoggingEnabled',
+          <String, dynamic>{'loggingEnabled': loggingEnabled});
+    } else {
+      developer.log(
+          '`setLoggingEnabled` failed: loggingEnabled cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// This controls whether to automatically send the client IP Address as part of event tracking.
+  /// With an IP address, geo-location is possible down to neighborhoods within a city,
+  /// although the Mixpanel Dashboard will just show you city level location specificity.
+  ///
+  /// * [useIpAddressForGeolocation] whether to automatically send the client IP Address. Defaults to true.
+  void setUseIpAddressForGeolocation(bool useIpAddressForGeolocation) {
+    // ignore: unnecessary_null_comparison
+    if (useIpAddressForGeolocation != null) {
+      _channel.invokeMethod<void>(
+          'setUseIpAddressForGeolocation', <String, dynamic>{
+        'useIpAddressForGeolocation': useIpAddressForGeolocation
+      });
+    } else {
+      developer.log(
+          '`setUseIpAddressForGeolocation` failed: useIpAddressForGeolocation cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// Will return true if the user has opted out from tracking.
+  /// return true if user has opted out from tracking. Defaults to false.
+  Future<bool?> hasOptedOutTracking() async {
+    return await _channel.invokeMethod<bool>('hasOptedOutTracking');
+  }
+
+  /// Use this method to n
+  /// opt-in an already opted-out user from tracking. People updates and track
+  /// calls will be sent to Mixpanel after using this method.
+  /// This method will internally track an opt-in event to your project.
+  void optInTracking() {
+    _channel.invokeMethod<void>('optInTracking');
+  }
+
+  /// Use this method to opt-out a user from tracking. Events and people updates that haven't been
+  /// flushed yet will be deleted. Use flush() before calling this method if you want
+  /// to send all the queues to Mixpanel before.
+  ///
+  /// This method will also remove any user-related information from the device.
+  void optOutTracking() {
+    _channel.invokeMethod<void>('optOutTracking');
+  }
+
+  /// Set the number of events sent in a single network request to the Mixpanel server.
+  /// By configuring this value, you can optimize network usage and manage the frequency of communication between the client
+  /// and the server. The maximum size is 50; any value over 50 will default to 50.
+  /// * [flushBatchSize] an int representing the number of events sent in a single network request.
+  void setFlushBatchSize(int flushBatchSize) {
+    _channel.invokeMethod<void>('setFlushBatchSize',
+        <String, dynamic>{'flushBatchSize': flushBatchSize});
+  }
+
+  /// Associate all future calls to track() with the user identified by
+  /// the given distinct id.
+  ///
+  /// <p>Calls to track() made before corresponding calls to identify
+  /// will use an anonymous locally generated distinct id, which means it is best to call identify
+  /// early to ensure that your Mixpanel funnels and retention analytics can continue to track the
+  /// user throughout their lifetime. We recommend calling identify when the user authenticates.
+  ///
+  /// <p>Once identify is called, the local distinct id persists across restarts of
+  /// your application.
+  ///
+  /// * [distinctId] a string uniquely identifying this user. Events sent to
+  /// Mixpanel using the same disinct_id will be considered associated with the
+  /// same visitor/customer for retention and funnel reporting, so be sure that the given
+  /// value is globally unique for each individual user you intend to track.
+  Future<void> identify(String distinctId) async {
+    if (_MixpanelHelper.isValidString(distinctId)) {
+      await _channel.invokeMethod<void>(
+          'identify', <String, dynamic>{'distinctId': distinctId});
+    } else {
+      developer.log('`identify` failed: distinctId cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// The alias method creates an alias which Mixpanel will use to remap one id to another.
+  /// Multiple aliases can point to the same identifier.
+  ///
+  ///  `mixpanel.alias("New ID", mixpanel.distinctId)`
+  ///  `mixpanel.alias("Newer ID", mixpanel.distinctId)`
+  ///
+  /// This call does not identify the user after. You must still call both identify() and
+  /// People.identify() if you wish the new alias to be used for Events and People.
+  ///
+  ///  * [alias] A unique identifier that you want to use as an identifier for this user.
+  ///  * [distinctId] the current distinct_id that alias will be mapped to.
+  void alias(String alias, String distinctId) {
+    if (!_MixpanelHelper.isValidString(alias)) {
+      developer.log('`alias` failed: alias cannot be blank', name: 'mixpanel');
+      return;
+    }
+    if (!_MixpanelHelper.isValidString(distinctId)) {
+      developer.log('`alias` failed: distinctId cannot be blank',
+          name: 'Mixpanel');
+      return;
+    }
+    _channel.invokeMethod<void>(
+        'alias', <String, dynamic>{'alias': alias, 'distinctId': distinctId});
+  }
+
+  /// Track an event.
+  ///
+  /// Every call to track eventually results in a data point sent to Mixpanel. These data points
+  /// are what are measured, counted, and broken down to create your Mixpanel reports. Events
+  /// have a string name, and an optional set of name/value pairs that describe the properties of
+  /// that event.
+  ///
+  /// * [eventName] The name of the event to send
+  /// * [properties] An optional map containing the key value pairs of the properties to include in this event.
+  Future<void> track(
+    String eventName, {
+    Map<String, dynamic>? properties,
+  }) async {
+    if (_MixpanelHelper.isValidString(eventName)) {
+      await _channel.invokeMethod<void>('track',
+          <String, dynamic>{'eventName': eventName, 'properties': _MixpanelHelper.ensureSerializableProperties(properties)});
+    } else {
+      developer.log('`track` failed: eventName cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// Returns a Mixpanel People object that can be used to set and increment
+  /// People Analytics properties.
+  ///
+  /// return an instance of People that you can use to update records in Mixpanel People Analytics
+  People getPeople() {
+    return _people;
+  }
+
+  /// Returns a FeatureFlags object that can be used to access feature flag values and metadata.
+  FeatureFlags getFeatureFlags() {
+    return _featureFlags;
+  }
+
+  /// Returns an Autocapture object that can be used to manually track
+  /// screen view and screen leave events with autocapture metadata.
+  Autocapture get autocapture {
+    _autocapture ??= Autocapture();
+    return _autocapture!;
+  }
+
+  ///  Track an event with specific groups.
+  ///
+  ///  Every call to track eventually results in a data point sent to Mixpanel. These data points
+  ///  are what are measured, counted, and broken down to create your Mixpanel reports. Events
+  ///  have a string name, and an optional set of name/value pairs that describe the properties of
+  ///  that event. Group key/value pairs are upserted into the property map before tracking.
+  ///
+  ///  * [eventName] The name of the event to send
+  ///  * [properties] A Map containing the key value pairs of the properties to include in this event.
+  ///  * [groups] A Map containing the group key value pairs for this event.
+  Future<void> trackWithGroups(
+    String eventName,
+    Map<String, dynamic> properties,
+    Map<String, dynamic> groups,
+  ) async {
+    if (_MixpanelHelper.isValidString(eventName)) {
+      await _channel.invokeMethod<void>('trackWithGroups', <String, dynamic>{
+        'eventName': eventName,
+        'properties': _MixpanelHelper.ensureSerializableProperties(properties),
+        'groups': _MixpanelHelper.ensureSerializableProperties(groups)
+      });
+    } else {
+      developer.log('`trackWithGroups` failed: eventName cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// Set the group this user belongs to.
+  ///
+  /// * [groupKey] The property name associated with this group type (must already have been set up).
+  /// * [groupID] The group the user belongs to.
+  void setGroup(String groupKey, dynamic groupID) {
+    if (_MixpanelHelper.isValidString(groupKey)) {
+      _channel.invokeMethod<void>('setGroup',
+          <String, dynamic>{'groupKey': groupKey, 'groupID': _MixpanelHelper.ensureSerializableValue(groupID)});
+    } else {
+      developer.log('`setGroup` failed: groupKey cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// Returns a MixpanelGroup object that can be used to set and increment
+  /// Group Analytics properties.
+  ///
+  /// * [groupKey] String identifying the type of group (must be already in use as a group key)
+  /// * [groupID] Object identifying the specific group
+  /// return an instance of MixpanelGroup that you can use to update
+  ///     records in Mixpanel Group Analytics
+  MixpanelGroup getGroup(String groupKey, dynamic groupID) {
+    return MixpanelGroup(_token, groupKey, _MixpanelHelper.ensureSerializableValue(groupID));
+  }
+
+  /// Add a group to this user's membership for a particular group key
+  ///
+  /// * [groupKey] The property name associated with this group type (must already have been set up).
+  /// * [groupID] The new group the user belongs to.
+  void addGroup(String groupKey, dynamic groupID) {
+    if (_MixpanelHelper.isValidString(groupKey)) {
+      _channel.invokeMethod<void>('addGroup',
+          <String, dynamic>{'groupKey': groupKey, 'groupID': _MixpanelHelper.ensureSerializableValue(groupID)});
+    } else {
+      developer.log('`addGroup` failed: groupKey cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// Remove a group from this user's membership for a particular group key
+  ///
+  /// * [groupKey] The property name associated with this group type (must already have been set up).
+  /// * [groupID] The group value to remove.
+  void removeGroup(String groupKey, dynamic groupID) {
+    if (_MixpanelHelper.isValidString(groupKey)) {
+      _channel.invokeMethod<void>('removeGroup',
+          <String, dynamic>{'groupKey': groupKey, 'groupID': _MixpanelHelper.ensureSerializableValue(groupID)});
+    } else {
+      developer.log('`removeGroup` failed: groupKey cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// Permanently deletes this group's record from Group Analytics.
+  ///
+  /// * [groupKey] String identifying the type of group (must be already in use as a group key)
+  /// * [groupID] Object identifying the specific group
+  ///
+  /// Calling deleteGroup deletes an entire record completely. Any future calls
+  /// to Group Analytics using the same group value will create and store new values.
+  void deleteGroup(String groupKey, dynamic groupID) {
+    if (_MixpanelHelper.isValidString(groupKey)) {
+      _channel.invokeMethod<void>('deleteGroup',
+          <String, dynamic>{'groupKey': groupKey, 'groupID': _MixpanelHelper.ensureSerializableValue(groupID)});
+    } else {
+      developer.log('`deleteGroup` failed: groupKey cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// Register properties that will be sent with every subsequent call to track().
+  ///
+  /// SuperProperties are a collection of properties that will be sent with every event to Mixpanel,
+  /// and persist beyond the lifetime of your application.
+  ///
+  /// Setting a superProperty with registerSuperProperties will store a new superProperty,
+  /// possibly overwriting any existing superProperty with the same name (to set a
+  /// superProperty only if it is currently unset, use registerSuperPropertiesOnce())
+  ///
+  /// SuperProperties will persist even if your application is taken completely out of memory.
+  /// to remove a superProperty, call unregisterSuperProperty() or clearSuperProperties()
+  ///
+  /// * [properties] A Map containing super properties to register
+  Future<void> registerSuperProperties(Map<String, dynamic> properties) async {
+    await _channel.invokeMethod<void>(
+        'registerSuperProperties', <String, dynamic>{'properties': _MixpanelHelper.ensureSerializableProperties(properties)});
+  }
+
+  /// Register super properties for events, only if no other super property with the
+  /// same names has already been registered.
+  ///
+  /// Calling registerSuperPropertiesOnce will never overwrite existing properties.
+  ///
+  /// * [properties] A Map containing the super properties to register.
+  Future<void> registerSuperPropertiesOnce(
+    Map<String, dynamic> properties,
+  ) async {
+    await _channel.invokeMethod<void>('registerSuperPropertiesOnce',
+        <String, dynamic>{'properties': _MixpanelHelper.ensureSerializableProperties(properties)});
+  }
+
+  /// Remove a single superProperty, so that it will not be sent with future calls to track().
+  ///
+  /// If there is a superProperty registered with the given name, it will be permanently
+  /// removed from the existing superProperties.
+  /// To clear all superProperties, use clearSuperProperties()
+  ///
+  /// * [propertyName] name of the property to unregister
+  Future<void> unregisterSuperProperty(String propertyName) async {
+    if (_MixpanelHelper.isValidString(propertyName)) {
+      await _channel.invokeMethod<void>('unregisterSuperProperty',
+          <String, dynamic>{'propertyName': propertyName});
+    } else {
+      developer.log(
+          '`unregisterSuperProperty` failed: propertyName cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// Returns a Map of the user's current super properties
+  ///
+  /// SuperProperties are a collection of properties that will be sent with every event to Mixpanel,
+  /// and persist beyond the lifetime of your application.
+  ///
+  /// return Super properties for this Mixpanel instance.
+  Future<Map?> getSuperProperties() async {
+    return await _channel.invokeMethod<Map>('getSuperProperties');
+  }
+
+  /// Erase all currently registered superProperties.
+  ///
+  /// Future tracking calls to Mixpanel will not contain the specific
+  /// superProperties registered before the clearSuperProperties method was called.
+  ///
+  /// To remove a single superProperty, use unregisterSuperProperty()
+  Future<void> clearSuperProperties() async {
+    await _channel.invokeMethod<void>('clearSuperProperties');
+  }
+
+  /// Begin timing of an event. Calling timeEvent("Thing") will not send an event, but
+  /// when you eventually call track("Thing"), your tracked event will be sent with a "$duration"
+  /// property, representing the number of seconds between your calls.
+  ///
+  /// * [eventName] the name of the event to track with timing.
+  void timeEvent(String eventName) {
+    if (_MixpanelHelper.isValidString(eventName)) {
+      _channel.invokeMethod<void>(
+          'timeEvent', <String, dynamic>{'eventName': eventName});
+    } else {
+      developer.log('`timeEvent` failed: eventName cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// Retrieves the time elapsed for the named event since timeEvent() was called.
+  ///
+  /// * [eventName] the name of the event to be tracked that was previously called with timeEvent()
+  ///
+  /// Time elapsed since timeEvent(String) was called for the given eventName.
+  Future<double?> eventElapsedTime(String eventName) async {
+    if (_MixpanelHelper.isValidString(eventName)) {
+      return await _channel.invokeMethod<double>(
+          'eventElapsedTime', <String, dynamic>{'eventName': eventName});
+    } else {
+      return 0;
+    }
+  }
+
+  /// Clear super properties and generates a new random distinctId for this instance.
+  /// Useful for clearing data when a user logs out.
+  Future<void> reset() async {
+    await _channel.invokeMethod<void>('reset');
+  }
+
+  /// Returns the current distinct id of the user.
+  /// This is either the id automatically generated by the library or the id that has been passed by a call to identify().
+  ///
+  /// example of usage:
+  ///
+  /// ```
+  ///    const distinctId = await mixpanel.getDistinctId();
+  ///
+  /// ```
+  ///
+  /// return Future<String> the distinct id associated with Mixpanel event and People Analytics
+  Future<String> getDistinctId() {
+    return _channel
+        .invokeMethod<String>('getDistinctId')
+        .then<String>((String? value) => value ?? '');
+  }
+
+  /// Push all queued Mixpanel events and People Analytics changes to Mixpanel servers.
+  ///
+  /// Events and People messages are pushed gradually throughout
+  /// the lifetime of your application. This means that to ensure that all messages
+  /// are sent to Mixpanel when your application is shut down, you will
+  /// need to call flush() to let the Mixpanel library know it should
+  /// send all remaining messages to the server.
+  Future<void> flush() async {
+    await _channel.invokeMethod('flush');
+  }
+}
+
+/// Core class for using Mixpanel People Analytics features.
+///
+/// The People object is used to update properties in a user's People Analytics record,
+/// and to manage the receipt of push notifications sent via Mixpanel Engage.
+/// For this reason, it's important to call identify(String) on the People
+/// object before you work with it. Once you call identify, the user identity will
+/// persist across stops and starts of your application, until you make another
+/// call to identify using a different id.
+class People {
+  // ignore: prefer_const_declarations
+  static final MethodChannel _channel = kIsWeb
+      ? const MethodChannel('mixpanel_flutter')
+      : const MethodChannel(
+          'mixpanel_flutter', StandardMethodCodec(MixpanelMessageCodec()));
+
+  final String _token;
+
+  People(String token) : _token = token;
+
+  /// Sets a single property with the given name and value for this user.
+  /// The given name and value will be assigned to the user in Mixpanel People Analytics,
+  /// possibly overwriting an existing property with the same name.
+  ///
+  /// * [prop] The name of the Mixpanel property. This must be a String, for example "Zip Code"
+  /// * [to] The value of the Mixpanel property. For "Zip Code", this value might be the String "90210"
+  ///
+  void set(String prop, dynamic to) {
+    if (_MixpanelHelper.isValidString(prop)) {
+      Map<String, dynamic> properties = {prop: to};
+      _channel.invokeMethod<void>('set',
+          <String, dynamic>{'token': _token, 'properties': _MixpanelHelper.ensureSerializableProperties(properties)});
+    } else {
+      developer.log('`people set` failed: prop cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// Works just like set(), except it will not overwrite existing property values. This is useful for properties like "First login date".
+  ///
+  /// * [prop] The name of the Mixpanel property. This must be a String, for example "Zip Code"
+  /// * [to] The value of the Mixpanel property. For "Zip Code", this value might be the String "90210"
+  void setOnce(String prop, dynamic to) {
+    if (_MixpanelHelper.isValidString(prop)) {
+      Map<String, dynamic> properties = {prop: to};
+      _channel.invokeMethod<void>('setOnce',
+          <String, dynamic>{'token': _token, 'properties': _MixpanelHelper.ensureSerializableProperties(properties)});
+    } else {
+      developer.log('`people setOnce` failed: prop cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// Add the given amount to an existing property on the identified user. If the user does not already
+  /// have the associated property, the amount will be added to zero. To reduce a property,
+  /// provide a negative number for the value.
+  ///
+  /// * [prop] the People Analytics property that should have its value changed
+  /// * [by] the amount to be added to the current value of the named property
+  void increment(String prop, double by) {
+    Map<String, dynamic> properties = {prop: by};
+    if (_MixpanelHelper.isValidString(prop)) {
+      _channel.invokeMethod<void>('increment',
+          <String, dynamic>{'token': _token, 'properties': _MixpanelHelper.ensureSerializableProperties(properties)});
+    } else {
+      developer.log('`people increment` failed: prop cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  ///  Appends a value to a list-valued property. If the property does not currently exist,
+  ///  it will be created as a list of one element. If the property does exist and doesn't
+  ///  currently have a list value, the append will be ignored.
+  ///  * [name] the People Analytics property that should have it's value appended to
+  ///  * [value] the new value that will appear at the end of the property's list
+  void append(String name, dynamic value) {
+    if (_MixpanelHelper.isValidString(name)) {
+      if (kIsWeb || Platform.isIOS || Platform.isMacOS) {
+        Map<String, dynamic> properties = {name: value};
+        _channel.invokeMethod<void>('append',
+            <String, dynamic>{'token': _token, 'properties': _MixpanelHelper.ensureSerializableProperties(properties)});
+      } else {
+        _channel.invokeMethod<void>('append', <String, dynamic>{
+          'token': _token,
+          'name': name,
+          'value': _MixpanelHelper.ensureSerializableValue(value)
+        });
+      }
+    } else {
+      developer.log('`people append` failed: name cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// Adds values to a list-valued property only if they are not already present in the list.
+  /// If the property does not currently exist, it will be created with the given list as it's value.
+  /// If the property exists and is not list-valued, the union will be ignored.
+  ///
+  /// * [name] name of the list-valued property to set or modify
+  /// * [value] an array of values to add to the property value if not already present
+  void union(String name, List<dynamic> value) {
+    if (_MixpanelHelper.isValidString(name)) {
+      if (kIsWeb || Platform.isIOS || Platform.isMacOS) {
+        Map<String, dynamic> properties = {name: value};
+        _channel.invokeMethod<void>('union',
+            <String, dynamic>{'token': _token, 'properties': _MixpanelHelper.ensureSerializableProperties(properties)});
+      } else {
+        _channel.invokeMethod<void>('union', <String, dynamic>{
+          'token': _token,
+          'name': name,
+          'value': _MixpanelHelper.ensureSerializableValue(value)
+        });
+      }
+    } else {
+      developer.log('`people union` failed: name cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// Remove value from a list-valued property only if they are already present in the list.
+  /// If the property does not currently exist, the remove will be ignored.
+  /// If the property exists and is not list-valued, the remove will be ignored.
+  ///
+  /// * [name] the People Analytics property that should have it's value removed from
+  /// * [value] the value that will be removed from the property's list
+  void remove(String name, dynamic value) {
+    if (_MixpanelHelper.isValidString(name)) {
+      if (kIsWeb || Platform.isIOS || Platform.isMacOS) {
+        Map<String, dynamic> properties = {name: value};
+        _channel.invokeMethod<void>('remove',
+            <String, dynamic>{'token': _token, 'properties': _MixpanelHelper.ensureSerializableProperties(properties)});
+      } else {
+        _channel.invokeMethod<void>('remove', <String, dynamic>{
+          'token': _token,
+          'name': name,
+          'value': _MixpanelHelper.ensureSerializableValue(value)
+        });
+      }
+    } else {
+      developer.log('`people remove` failed: name cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// permanently removes the property with the given name from the user's profile
+  ///
+  /// * [name] name of a property to unset
+  void unset(String name) {
+    if (_MixpanelHelper.isValidString(name)) {
+      _channel.invokeMethod<void>(
+          'unset', <String, dynamic>{'token': _token, 'name': name});
+    } else {
+      developer.log('`people unset` failed: name cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// Track a revenue transaction for the identified people profile.
+  ///
+  /// * [amount] the amount of money exchanged. Positive amounts represent purchases or income from the customer, negative amounts represent refunds or payments to the customer.
+  /// * [properties] an optional collection of properties to associate with this transaction.
+  void trackCharge(double amount, {Map<String, dynamic>? properties}) {
+    // ignore: unnecessary_null_comparison
+    if (amount != null) {
+      _channel.invokeMethod<void>('trackCharge', <String, dynamic>{
+        'token': _token,
+        'amount': amount,
+        'properties': _MixpanelHelper.ensureSerializableProperties(properties)
+      });
+    } else {
+      developer.log('`people trackCharge` failed: amount cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// Permanently clear the whole transaction history for the identified people profile.
+  void clearCharges() {
+    _channel.invokeMethod<void>(
+        'clearCharges', <String, dynamic>{'token': _token});
+  }
+
+  /// Permanently deletes the identified user's record from People Analytics.
+  ///
+  /// Calling deleteUser deletes an entire record completely. Any future calls
+  /// to People Analytics using the same distinct id will create and store new values.
+  void deleteUser() {
+    _channel.invokeMethod<void>(
+        'deleteUser', <String, dynamic>{'token': _token});
+  }
+}
+
+/// Core class for using Mixpanel Group Analytics features.
+///
+/// The MixpanelGroup object is used to update properties in a group's Group Analytics record.
+class MixpanelGroup {
+  // ignore: prefer_const_declarations
+  static final MethodChannel _channel = kIsWeb
+      ? const MethodChannel('mixpanel_flutter')
+      : const MethodChannel(
+          'mixpanel_flutter', StandardMethodCodec(MixpanelMessageCodec()));
+
+  final String _token;
+  final String _groupKey;
+  final dynamic _groupID;
+
+  MixpanelGroup(String token, String groupKey, dynamic groupID)
+      : _token = token,
+        _groupKey = groupKey,
+        _groupID = groupID;
+
+  /// Sets a single property with the given name and value for this group.
+  /// The given name and value will be assigned to the user in Mixpanel Group Analytics,
+  /// possibly overwriting an existing property with the same name.
+  ///
+  /// * [prop] The name of the Mixpanel property. This must be a String, for example "Zip Code"
+  /// * [to] The value to set on the given property name. For "Zip Code", this value might be the String "90210"
+  void set(String prop, String to) {
+    if (_MixpanelHelper.isValidString(prop)) {
+      Map<String, dynamic> properties = {prop: to};
+
+      _channel.invokeMethod<void>('groupSetProperties', <String, dynamic>{
+        'token': _token,
+        'groupKey': _groupKey,
+        'groupID': _groupID,
+        'properties': _MixpanelHelper.ensureSerializableProperties(properties)
+      });
+    } else {
+      developer.log('`group set` failed: prop cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// Works just like groupSet() except it will not overwrite existing property values. This is useful for properties like "First login date".
+  ///
+  /// * [prop] The name of the Mixpanel property. This must be a String, for example "Zip Code"
+  /// * [to] The value to set on the given property name. For "Zip Code", this value might be the String "90210"
+  void setOnce(String prop, String to) {
+    if (_MixpanelHelper.isValidString(prop)) {
+      Map<String, dynamic> properties = {prop: to};
+
+      _channel.invokeMethod<void>('groupSetPropertyOnce', <String, dynamic>{
+        'token': _token,
+        'groupKey': _groupKey,
+        'groupID': _groupID,
+        'properties': _MixpanelHelper.ensureSerializableProperties(properties)
+      });
+    } else {
+      developer.log('`group setOnce` failed: prop cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// Permanently removes the property with the given name from the group's profile
+  ///
+  /// * [prop] name of a property to unset
+  void unset(String prop) {
+    if (_MixpanelHelper.isValidString(prop)) {
+      _channel.invokeMethod<void>('groupUnsetProperty', <String, dynamic>{
+        'token': _token,
+        'groupKey': _groupKey,
+        'groupID': _groupID,
+        'propertyName': prop
+      });
+    } else {
+      developer.log('`group unset` failed: prop cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// Remove value from a list-valued property only if it is already present in the list.
+  /// If the property does not currently exist, the remove will be ignored.
+  /// If the property exists and is not list-valued, the remove will be ignored.
+  ///
+  /// * [name] the Group Analytics list-valued property that should have a value removed
+  /// * [value] the value that will be removed from the list
+  void remove(String name, dynamic value) {
+    if (_MixpanelHelper.isValidString(name)) {
+      _channel.invokeMethod<void>('groupRemovePropertyValue', <String, dynamic>{
+        'token': _token,
+        'groupKey': _groupKey,
+        'groupID': _groupID,
+        'name': name,
+        'value': _MixpanelHelper.ensureSerializableValue(value)
+      });
+    } else {
+      developer.log('`group remove` failed: name cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// Adds values to a list-valued property only if they are not already present in the list.
+  /// If the property does not currently exist, it will be created with the given list as its value.
+  /// If the property exists and is not list-valued, the union will be ignored.
+  ///
+  /// * [name] name of the list-valued property to set or modify
+  /// * [value] an array of values to add to the property value if not already present
+  void union(String name, List<dynamic> value) {
+    if (!_MixpanelHelper.isValidString(name)) {
+      developer.log('`group union` failed: name cannot be blank',
+          name: 'Mixpanel');
+      return;
+    }
+    // ignore: unnecessary_null_comparison
+    if (value == null) {
+      developer.log('`group union` failed: value cannot be blank',
+          name: 'Mixpanel');
+      return;
+    }
+    _channel.invokeMethod<void>('groupUnionProperty', <String, dynamic>{
+      'token': _token,
+      'groupKey': _groupKey,
+      'groupID': _groupID,
+      'name': name,
+      'value': _MixpanelHelper.ensureSerializableValue(value)
+    });
+  }
+}
+
+/// Core class for using Mixpanel Feature Flags.
+///
+/// The FeatureFlags object is used to access feature flag values and metadata.
+/// Feature flags allow you to control feature rollout and run experiments.
+class FeatureFlags {
+  // ignore: prefer_const_declarations
+  static final MethodChannel _channel = kIsWeb
+      ? const MethodChannel('mixpanel_flutter')
+      : const MethodChannel(
+          'mixpanel_flutter', StandardMethodCodec(MixpanelMessageCodec()));
+
+  final String _token;
+
+  FeatureFlags(String token) : _token = token;
+
+  /// Check if feature flags have been loaded and are ready to use.
+  ///
+  /// Returns true if flags are loaded and ready, false otherwise.
+  Future<bool> areFlagsReady() async {
+    final result = await _channel.invokeMethod<bool>(
+        'areFlagsReady', <String, dynamic>{'token': _token});
+    return result ?? false;
+  }
+
+  /// Get the full variant for a feature flag, including metadata.
+  ///
+  /// * [flagName] The name of the feature flag
+  /// * [fallback] A fallback variant to use if the flag is not found or not ready
+  ///
+  /// Returns the MixpanelFlagVariant for the flag, or the fallback if not available.
+  Future<MixpanelFlagVariant> getVariant(
+      String flagName, MixpanelFlagVariant fallback) async {
+    if (!_MixpanelHelper.isValidString(flagName)) {
+      developer.log('`getVariant` failed: flagName cannot be blank',
+          name: 'Mixpanel');
+      return fallback;
+    }
+    final result = await _channel.invokeMethod<Map>('getVariant', <String, dynamic>{
+      'token': _token,
+      'flagName': flagName,
+      'fallback': fallback.toMap(),
+    });
+    if (result != null) {
+      return MixpanelFlagVariant.fromMap(result);
+    }
+    return fallback;
+  }
+
+  /// Get just the value of a feature flag.
+  ///
+  /// * [flagName] The name of the feature flag
+  /// * [fallbackValue] A fallback value to use if the flag is not found or not ready
+  ///
+  /// Returns the value of the flag, or the fallback value if not available.
+  Future<dynamic> getVariantValue(String flagName, dynamic fallbackValue) async {
+    if (!_MixpanelHelper.isValidString(flagName)) {
+      developer.log('`getVariantValue` failed: flagName cannot be blank',
+          name: 'Mixpanel');
+      return fallbackValue;
+    }
+    final result = await _channel.invokeMethod<dynamic>('getVariantValue', <String, dynamic>{
+      'token': _token,
+      'flagName': flagName,
+      'fallbackValue': _MixpanelHelper.ensureSerializableValue(fallbackValue),
+    });
+    return result ?? fallbackValue;
+  }
+
+  /// Check if a boolean feature flag is enabled.
+  ///
+  /// This method is designed for feature flags that have boolean values.
+  /// If the flag's value is not a boolean type, the fallback value will be returned.
+  ///
+  /// * [flagName] The name of the feature flag
+  /// * [fallbackValue] A fallback value to use if the flag is not found, not ready,
+  ///   or has a non-boolean value
+  ///
+  /// Returns true if the flag is enabled, the fallback value otherwise.
+  Future<bool> isEnabled(String flagName, bool fallbackValue) async {
+    if (!_MixpanelHelper.isValidString(flagName)) {
+      developer.log('`isEnabled` failed: flagName cannot be blank',
+          name: 'Mixpanel');
+      return fallbackValue;
+    }
+    final result = await _channel.invokeMethod<bool>('isEnabled', <String, dynamic>{
+      'token': _token,
+      'flagName': flagName,
+      'fallbackValue': fallbackValue,
+    });
+    return result ?? fallbackValue;
+  }
+
+  /// Update the context used for feature flag evaluation.
+  ///
+  /// * [context] A Map of context properties to use for flag evaluation.
+  ///   This entirely replaces any previously set custom context.
+  /// * [options] Reserved for future use. Currently not implemented by the
+  ///   native SDKs and will be ignored.
+  ///
+  /// After setting the new context, the SDK automatically re-fetches flags
+  /// from Mixpanel servers. The returned [Future] completes when the
+  /// re-fetch is done.
+  Future<void> updateContext(Map<String, dynamic> context,
+      {Map<String, dynamic>? options}) async {
+    await _channel.invokeMethod<void>('updateFlagsContext', <String, dynamic>{
+      'token': _token,
+      'context': _MixpanelHelper.ensureSerializableProperties(context),
+      'options': _MixpanelHelper.ensureSerializableProperties(options),
+    });
+  }
+
+  /// Manually triggers a fresh fetch of feature flag variant assignments
+  /// from Mixpanel servers.
+  ///
+  /// The returned [Future] completes when flags have been fetched and applied.
+  ///
+  /// On mobile (iOS/Android), throws [PlatformException] if the fetch fails
+  /// (e.g., network error). This is intentional — unlike other SDK methods
+  /// that fail silently, `loadFlags` propagates errors so developers can
+  /// implement kill-switch scenarios and respond to flag loading failures.
+  Future<void> loadFlags() async {
+    await _channel.invokeMethod<void>(
+        'loadFlags', <String, dynamic>{'token': _token});
+  }
+
+  /// Asynchronously retrieves all loaded feature flag variants.
+  ///
+  /// If flags are not yet loaded, the underlying native SDK will trigger a fetch.
+  /// Returns an empty map when no flags are loaded. Does NOT trigger an
+  /// exposure event for any flag.
+  ///
+  /// On mobile (iOS/Android), throws [PlatformException] with code
+  /// `MIXPANEL_UNINITIALIZED` if called before [Mixpanel.init].
+  Future<Map<String, MixpanelFlagVariant>> getAllVariants() async {
+    final result = await _channel.invokeMethod<Map>(
+        'getAllVariants', <String, dynamic>{'token': _token});
+    final variants = <String, MixpanelFlagVariant>{};
+    if (result == null) return variants;
+    result.forEach((key, value) {
+      if (key is String && value is Map) {
+        variants[key] = MixpanelFlagVariant.fromMap(value);
+      }
+    });
+    return variants;
+  }
+}
+
+/// Provides methods to manually track screen view and screen leave events
+/// with autocapture metadata.
+///
+/// Access via `mixpanel.autocapture`.
+class Autocapture {
+  // ignore: prefer_const_declarations
+  static final MethodChannel _channel = kIsWeb
+      ? const MethodChannel('mixpanel_flutter')
+      : const MethodChannel(
+          'mixpanel_flutter', StandardMethodCodec(MixpanelMessageCodec()));
+
+  Autocapture();
+
+  /// Tracks a screen view event (`$mp_page_view`) with autocapture metadata.
+  ///
+  /// The event automatically includes `current_page_title` set to [screenName]
+  /// and `$mp_autocapture` set to `true`. These SDK properties override any
+  /// user-provided properties with the same keys.
+  ///
+  /// If [screenName] is empty or whitespace-only, the call is silently ignored.
+  ///
+  /// * [screenName] The name of the screen being viewed
+  /// * [properties] Optional additional properties to include with the event
+  Future<void> trackScreenView(String screenName,
+      {Map<String, dynamic>? properties}) async {
+    if (_MixpanelHelper.isValidString(screenName)) {
+      await _channel.invokeMethod<void>(
+          'trackScreenView', <String, dynamic>{
+        'screenName': screenName,
+        'properties': _MixpanelHelper.ensureSerializableProperties(properties),
+      });
+    } else {
+      developer.log(
+          '`trackScreenView` failed: screenName cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+
+  /// Tracks a screen leave event (`$mp_page_leave`) with autocapture metadata.
+  ///
+  /// The event automatically includes `current_page_title` set to [screenName]
+  /// and `$mp_autocapture` set to `true`. These SDK properties override any
+  /// user-provided properties with the same keys.
+  ///
+  /// If [screenName] is empty or whitespace-only, the call is silently ignored.
+  ///
+  /// * [screenName] The name of the screen being left
+  /// * [properties] Optional additional properties to include with the event
+  Future<void> trackScreenLeave(String screenName,
+      {Map<String, dynamic>? properties}) async {
+    if (_MixpanelHelper.isValidString(screenName)) {
+      await _channel.invokeMethod<void>(
+          'trackScreenLeave', <String, dynamic>{
+        'screenName': screenName,
+        'properties': _MixpanelHelper.ensureSerializableProperties(properties),
+      });
+    } else {
+      developer.log(
+          '`trackScreenLeave` failed: screenName cannot be blank',
+          name: 'Mixpanel');
+    }
+  }
+}
+
+class _MixpanelHelper {
+  static isValidString(String input) {
+    // ignore: unnecessary_null_comparison
+    return input != null && input.trim().isNotEmpty;
+  }
+
+  /// Converts complex types to basic types for web platform
+  static dynamic ensureSerializableValue(dynamic value) {
+    if (!kIsWeb) {
+      return value;
+    }
+    if (value == null) {
+      return null;
+    } else if (value is DateTime) {
+      return value.toIso8601String();
+    } else if (value is Uri) {
+      return value.toString();
+    } else if (value is Map) {
+      return value.map((k, v) => MapEntry(k, ensureSerializableValue(v)));
+    } else if (value is List) {
+      return value.map((v) => ensureSerializableValue(v)).toList();
+    } else {
+      return value;
+    }
+  }
+
+  /// Converts properties map for web platform
+  static Map<String, dynamic>? ensureSerializableProperties(Map<String, dynamic>? properties) {
+    if (!kIsWeb || properties == null) {
+      return properties;
+    }
+    return properties.map((k, v) => MapEntry(k, ensureSerializableValue(v)));
+  }
+}

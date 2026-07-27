@@ -1,0 +1,719 @@
+import 'dart:async';
+import 'dart:js_interop';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_web_plugins/flutter_web_plugins.dart';
+import 'package:mixpanel_flutter/src/version.dart';
+import 'package:mixpanel_flutter/web/mixpanel_js_bindings.dart';
+
+/// Safely converts Dart values to JavaScript-compatible types for web interop.
+///
+/// This function handles the conversion of various Dart types to their JavaScript
+/// equivalents using the appropriate JS interop methods.
+///
+/// **Accepted input types:**
+/// - `JSAny` - Returned as-is to avoid double conversion
+/// - `Map` - Converted using `.jsify()` to a JavaScript object
+/// - `List` - Converted using `.jsify()` to a JavaScript array
+/// - `DateTime` - Converted using `.jsify()` to a JavaScript Date object
+/// - `bool` - Converted using `.toJS` to a JavaScript boolean
+/// - `num` (int/double) - Converted using `.toJS` to a JavaScript number
+/// - `String` - Converted using `.toJS` to a JavaScript string
+/// - Any other type - Logs a warning and returns null to prevent JS interop issues
+///
+/// **Return value:**
+/// Returns a `JSAny?` which represents the JavaScript-compatible value.
+/// The return type is nullable to handle cases where the input cannot be
+/// converted or is already null.
+///
+/// **Null handling:**
+/// - If the input value is `null`, it is explicitly checked and returned immediately
+/// - The function is null-safe and will not throw on null inputs
+///
+/// **Example usage:**
+/// ```dart
+/// Convert a Map to JavaScript object
+/// var jsObj = safeJsify({'key': 'value', 'count': 42});
+///
+/// Convert a List to JavaScript array
+/// var jsArray = safeJsify([1, 2, 3, 'four']);
+///
+/// Handles null gracefully
+/// var jsNull = safeJsify(null); // Returns null
+/// ```
+JSAny? safeJsify(dynamic value) {
+  if (value == null) {
+    return null;
+  } else if (value is Map) {
+    return value.jsify();
+  } else if (value is List) {
+    return value.jsify();
+  } else if (value is DateTime) {
+    return value.jsify();
+  } else if (value is bool) {
+    return value.toJS;
+  } else if (value is num) {
+    return value.toJS;
+  } else if (value is String) {
+    return value.toJS;
+  } else {
+    debugPrint(
+        '[Mixpanel] Warning: Unsupported type for JS conversion: ${value.runtimeType}. '
+        'Value will be ignored. Supported types are: Map, List, DateTime, bool, num, String, JSAny, and null.');
+    return null;
+  }
+}
+
+/// A web implementation of the MixpanelFlutter plugin.
+class MixpanelFlutterPlugin {
+  static final Map<String, String> _mixpanelProperties = {
+    '\$lib_version': sdkVersion,
+    'mp_lib': 'flutter',
+  };
+
+  static void registerWith(Registrar registrar) {
+    // Web platform doesn't need the custom codec since safeJsify handles type conversions
+    final MethodChannel channel = MethodChannel(
+      'mixpanel_flutter',
+      const StandardMethodCodec(),
+      registrar,
+    );
+
+    final pluginInstance = MixpanelFlutterPlugin();
+    channel.setMethodCallHandler(pluginInstance.handleMethodCall);
+  }
+
+  /// Handles method calls over the MethodChannel of this plugin.
+  /// Note: Check the "federated" architecture for a new way of doing this:
+  /// https://flutter.dev/go/federated-plugins
+  Future<dynamic> handleMethodCall(MethodCall call) async {
+    switch (call.method) {
+      case 'initialize':
+        initialize(call);
+        break;
+      case 'setServerURL':
+        handleSetServerURL(call);
+        break;
+      case "hasOptedOutTracking":
+        return handleHasOptedOutTracking();
+      case "optInTracking":
+        handleOptInTracking();
+        break;
+      case "optOutTracking":
+        handleOptOutTracking();
+        break;
+      case "setLoggingEnabled":
+        handleSetLoggingEnabled(call);
+        break;
+      case "identify":
+        handleIdentify(call);
+        break;
+      case "alias":
+        handleAlias(call);
+        break;
+      case 'track':
+        handleTrack(call);
+        break;
+      case "trackWithGroups":
+        handleTrackWithGroups(call);
+        break;
+      case "setGroup":
+        handleSetGroup(call);
+        break;
+      case "addGroup":
+        handleAddGroup(call);
+        break;
+      case "removeGroup":
+        handleRemoveGroup(call);
+        break;
+      case "registerSuperProperties":
+        handleRegisterSuperProperties(call);
+        break;
+      case "registerSuperPropertiesOnce":
+        handleRegisterSuperPropertiesOnce(call);
+        break;
+      case "unregisterSuperProperty":
+        handleUnregisterSuperProperty(call);
+        break;
+      case "timeEvent":
+        handleTimeEvent(call);
+        break;
+      case "reset":
+        handleReset();
+        break;
+      case "getDistinctId":
+        return handleGetDistinctId();
+      case "set":
+        handleSet(call);
+        break;
+      case "setOnce":
+        handleSetOnce(call);
+        break;
+      case "increment":
+        handlePeopleIncrement(call);
+        break;
+      case "append":
+        handlePeopleAppend(call);
+        break;
+      case "union":
+        handlePeopleUnion(call);
+        break;
+      case "remove":
+        handlePeopleRemove(call);
+        break;
+      case "unset":
+        handlePeopleUnset(call);
+        break;
+      case "trackCharge":
+        handleTrackCharge(call);
+        break;
+      case "clearCharge":
+        handleClearCharge();
+        break;
+      case "deleteUsers":
+        handleDeleteUsers();
+        break;
+      case "groupSetProperties":
+        handleGroupSetProperties(call);
+        break;
+      case "groupSetPropertyOnce":
+        handleGroupSetPropertyOnce(call);
+        break;
+      case "groupUnsetProperty":
+        handleGroupUnsetProperty(call);
+        break;
+      case "groupRemovePropertyValue":
+        handleGroupRemove(call);
+        break;
+      case "groupUnionProperty":
+        handleGroupUnion(call);
+        break;
+      case "areFlagsReady":
+        return handleAreFlagsReady();
+      case "getVariant":
+        return handleGetVariant(call);
+      case "getVariantValue":
+        return handleGetVariantValue(call);
+      case "isEnabled":
+        return handleIsEnabled(call);
+      case "updateFlagsContext":
+        return handleUpdateFlagsContext(call);
+      case 'loadFlags':
+        return handleLoadFlags();
+      case 'getAllVariants':
+        return handleGetAllVariants();
+      case 'trackScreenView':
+        handleTrackScreenView(call);
+        break;
+      case 'trackScreenLeave':
+        handleTrackScreenLeave(call);
+        break;
+      default:
+        throw PlatformException(
+          code: 'Unimplemented',
+          details:
+              'mixpanel_flutter for web doesn\'t implement \'${call.method}\'',
+        );
+    }
+  }
+
+  void initialize(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    String token = args['token'] as String;
+    dynamic config = args['config'];
+    Map<String, dynamic> initConfig = Map<String, dynamic>.from(config ?? {});
+
+    final serverURL = args['serverURL'];
+    if (serverURL is String && serverURL.isNotEmpty) {
+      initConfig['api_host'] = serverURL;
+    }
+
+    // Handle feature flags configuration
+    dynamic featureFlags = args['featureFlags'];
+    if (featureFlags != null && featureFlags is Map) {
+      bool enabled = featureFlags['enabled'] == true;
+      if (enabled) {
+        final flagsConfig = <String, dynamic>{};
+        dynamic context = featureFlags['context'];
+        if (context != null && context is Map && context.isNotEmpty) {
+          flagsConfig['context'] = context;
+        }
+        final persistence =
+            _flagsPersistenceFromPolicy(featureFlags['variantLookupPolicy']);
+        if (persistence != null) {
+          flagsConfig['persistence'] = persistence;
+        }
+        // Add prefetchFlags if provided, default to true
+        bool prefetchFlags = featureFlags['prefetchFlags'] ?? true;
+        flagsConfig['prefetchFlags'] = prefetchFlags;
+        initConfig['flags'] = flagsConfig.isEmpty ? true : flagsConfig;
+      }
+    }
+
+    init(token, safeJsify(initConfig));
+  }
+
+  void handleSetServerURL(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    String serverURL = args['serverURL'] as String;
+    set_config(safeJsify({'api_host': serverURL}));
+  }
+
+  void handleTrack(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    String eventName = args['eventName'] as String;
+    dynamic properties = args['properties'];
+    Map<String, dynamic> props = {
+      ..._mixpanelProperties,
+      ...(properties ?? {})
+    };
+    track(eventName, safeJsify(props));
+  }
+
+  void handleAlias(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    String aliasName = args['alias'] as String;
+    String distinctId = args['distinctId'] as String;
+    alias(aliasName, distinctId);
+  }
+
+  void handleIdentify(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    String distinctId = args['distinctId'] as String;
+    identify(distinctId);
+  }
+
+  void handleTrackWithGroups(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    String eventName = args['eventName'] as String;
+    dynamic properties = args['properties'];
+    Map<String, dynamic> props = {
+      ..._mixpanelProperties,
+      ...(properties ?? {})
+    };
+    dynamic groups = args["groups"];
+    track_with_groups(eventName, safeJsify(props), safeJsify(groups));
+  }
+
+  void handleSetGroup(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    String groupKey = args['groupKey'] as String;
+    dynamic groupID = args["groupID"];
+    if (groupID != null) {
+      set_group(groupKey, safeJsify(groupID));
+    }
+  }
+
+  void handleAddGroup(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    String groupKey = args['groupKey'] as String;
+    dynamic groupID = args["groupID"];
+
+    if (groupID != null) {
+      add_group(groupKey, safeJsify(groupID));
+    }
+  }
+
+  void handleRemoveGroup(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    String groupKey = args['groupKey'] as String;
+    dynamic groupID = args["groupID"];
+    if (groupID != null) {
+      remove_group(groupKey, safeJsify(groupID));
+    }
+  }
+
+  void handleRegisterSuperProperties(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    dynamic properties = args['properties'];
+    register(safeJsify(properties));
+  }
+
+  void handleRegisterSuperPropertiesOnce(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    dynamic properties = args['properties'];
+    register_once(safeJsify(properties));
+  }
+
+  void handleUnregisterSuperProperty(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    String propertyName = args['propertyName'] as String;
+    unregister(propertyName);
+  }
+
+  void handleTimeEvent(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    String eventName = args['eventName'] as String;
+    time_event(eventName);
+  }
+
+  void handleReset() {
+    reset();
+  }
+
+  String handleGetDistinctId() {
+    return get_distinct_id();
+  }
+
+  void handleSet(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    dynamic properties = args['properties'];
+    Map<String, dynamic> props = {..._mixpanelProperties, ...properties};
+    people_set(safeJsify(props));
+  }
+
+  void handleSetOnce(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    dynamic properties = args['properties'];
+    Map<String, dynamic> props = {..._mixpanelProperties, ...properties};
+    people_set_once(safeJsify(props));
+  }
+
+  void handlePeopleIncrement(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    dynamic properties = args['properties'];
+    people_increment(safeJsify(properties));
+  }
+
+  void handlePeopleAppend(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    dynamic properties = args['properties'];
+    people_append(safeJsify(properties));
+  }
+
+  void handlePeopleUnion(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    dynamic properties = args['properties'];
+    people_union(safeJsify(properties));
+  }
+
+  void handlePeopleRemove(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    dynamic properties = args['properties'];
+    people_remove(safeJsify(properties));
+  }
+
+  void handlePeopleUnset(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    dynamic properties = args['properties'];
+    people_unset(safeJsify(properties));
+  }
+
+  void handleTrackCharge(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    dynamic properties = args['properties'];
+    double amount = args['amount'] as double;
+    people_track_charge(amount, safeJsify(properties ?? <String, dynamic>{}));
+  }
+
+  void handleClearCharge() {
+    people_clear_charge();
+  }
+
+  void handleDeleteUsers() {
+    people_delete_users();
+  }
+
+  void handleGroupSetProperties(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    String groupKey = args['groupKey'] as String;
+    dynamic groupID = args['groupID'];
+
+    dynamic properties = args['properties'];
+    get_group(groupKey, safeJsify(groupID)).set(safeJsify(properties));
+  }
+
+  void handleGroupSetPropertyOnce(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    String groupKey = args['groupKey'] as String;
+    dynamic groupID = args['groupID'];
+
+    dynamic properties = args['properties'];
+
+    get_group(groupKey, safeJsify(groupID))
+        .set_once(properties.keys.first, properties[properties.keys.first]);
+  }
+
+  void handleGroupUnsetProperty(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    String groupKey = args['groupKey'] as String;
+    dynamic groupID = args['groupID'];
+
+    String propertyName = args['propertyName'] as String;
+    get_group(groupKey, safeJsify(groupID)).unset(propertyName);
+  }
+
+  void handleGroupRemove(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    String groupKey = args['groupKey'] as String;
+    dynamic groupID = args['groupID'];
+
+    String name = args['name'] as String;
+    dynamic value = args['value'];
+    get_group(groupKey, safeJsify(groupID)).remove(name, safeJsify(value));
+  }
+
+  void handleGroupUnion(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    String groupKey = args['groupKey'] as String;
+    dynamic groupID = args['groupID'];
+
+    String name = args['name'] as String;
+    JSAny? value = safeJsify(args['value'] as dynamic);
+    get_group(groupKey, safeJsify(groupID))
+        .union(name, value is JSArray ? value : <JSAny>[].toJS);
+  }
+
+  bool handleHasOptedOutTracking() {
+    return has_opted_out_tracking();
+  }
+
+  void handleOptInTracking() {
+    opt_in_tracking();
+  }
+
+  void handleOptOutTracking() {
+    opt_out_tracking();
+  }
+
+  void handleTrackScreenView(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    String screenName = args['screenName'] as String;
+    dynamic properties = args['properties'];
+    Map<String, dynamic> props = {
+      ...(properties ?? {}),
+      ..._mixpanelProperties,
+      'current_page_title': screenName,
+      '\$mp_autocapture': true,
+    };
+    track('\$mp_page_view', safeJsify(props));
+  }
+
+  void handleTrackScreenLeave(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    String screenName = args['screenName'] as String;
+    dynamic properties = args['properties'];
+    Map<String, dynamic> props = {
+      ...(properties ?? {}),
+      ..._mixpanelProperties,
+      'current_page_title': screenName,
+      '\$mp_autocapture': true,
+    };
+    track('\$mp_page_leave', safeJsify(props));
+  }
+
+  void handleSetLoggingEnabled(MethodCall call) {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    bool loggingEnabled = args['loggingEnabled'] as bool;
+    set_config(safeJsify({'debug': loggingEnabled}));
+  }
+
+  // Feature Flags handlers
+
+  bool handleAreFlagsReady() {
+    return flags_are_flags_ready();
+  }
+
+  Future<Map<String, dynamic>> handleGetVariant(MethodCall call) async {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    String flagName = args['flagName'] as String;
+    Map<Object?, Object?> fallbackMap = args['fallback'] as Map<Object?, Object?>? ?? {};
+
+    JSAny? fallbackJs = safeJsify({
+      'key': fallbackMap['key'],
+      'value': fallbackMap['value'],
+    });
+
+    try {
+      JSPromise promise = flags_get_variant(flagName, fallbackJs);
+      JSAny? jsResult = await promise.toDart;
+      return _jsVariantToMap(jsResult, fallbackMap);
+    } catch (e) {
+      debugPrint('[Mixpanel] getVariant failed with error: $e, returning fallback');
+      return _jsVariantToMap(null, fallbackMap);
+    }
+  }
+
+  Future<dynamic> handleGetVariantValue(MethodCall call) async {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    String flagName = args['flagName'] as String;
+    dynamic fallbackValue = args['fallbackValue'];
+
+    JSAny? fallbackJs = safeJsify({
+      'key': flagName,
+      'value': fallbackValue,
+    });
+
+    try {
+      JSPromise promise = flags_get_variant(flagName, fallbackJs);
+      JSAny? jsResult = await promise.toDart;
+      Map<String, dynamic> variant = _jsVariantToMap(jsResult, {'key': flagName, 'value': fallbackValue});
+      return variant['value'] ?? fallbackValue;
+    } catch (e) {
+      debugPrint('[Mixpanel] getVariantValue failed with error: $e, returning fallback');
+      return fallbackValue;
+    }
+  }
+
+  Future<bool> handleIsEnabled(MethodCall call) async {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    String flagName = args['flagName'] as String;
+    bool fallbackValue = args['fallbackValue'] as bool? ?? false;
+
+    JSAny? fallbackJs = safeJsify({
+      'key': flagName,
+      'value': fallbackValue,
+    });
+
+    try {
+      JSPromise promise = flags_get_variant(flagName, fallbackJs);
+      JSAny? jsResult = await promise.toDart;
+      Map<String, dynamic> variant = _jsVariantToMap(jsResult, {'key': flagName, 'value': fallbackValue});
+      dynamic value = variant['value'];
+      if (value is bool) {
+        return value;
+      }
+      if (value != null) {
+        debugPrint('[Mixpanel] isEnabled flag \'$flagName\' has non-boolean value, returning fallback');
+      }
+      return fallbackValue;
+    } catch (e) {
+      debugPrint('[Mixpanel] isEnabled failed with error: $e, returning fallback');
+      return fallbackValue;
+    }
+  }
+
+  Future<void> handleUpdateFlagsContext(MethodCall call) async {
+    Map<Object?, Object?> args = call.arguments as Map<Object?, Object?>;
+    dynamic context = args['context'];
+    await flags_update_context(safeJsify(context ?? {})).toDart;
+  }
+
+  Future<void> handleLoadFlags() async {
+    await flags_load_flags().toDart;
+  }
+
+  /// Returns all loaded feature flag variants in the camelCase wire shape that
+  /// the iOS/Android handlers produce (so the Dart wrapper stays platform-agnostic).
+  ///
+  /// Reads the internal `mixpanel.flags.flags` Map directly. The map yields
+  /// variants with snake_case keys (`key` / `value` / `experiment_id` /
+  /// `is_experiment_active` / `is_qa_tester`), which `_convertJsFlagsMap`
+  /// translates to the camelCase shape the Dart wrapper expects.
+  Future<Map<String, Map<String, dynamic>>> handleGetAllVariants() async {
+    try {
+      final raw = flags_internal_map;
+      // mixpanel.flags.flags is a JS Map; dartify() treats JS Map/Set as opaque,
+      // so flatten to a plain object first via Object.fromEntries(Array.from(map)).
+      final plain = raw == null ? null : object_from_entries(array_from(raw));
+      return _convertJsFlagsMap(plain);
+    } catch (e) {
+      debugPrint('[Mixpanel] getAllVariants failed with error: $e, returning empty map');
+      return <String, Map<String, dynamic>>{};
+    }
+  }
+
+  Map<String, Map<String, dynamic>> _convertJsFlagsMap(JSAny? raw) {
+    final out = <String, Map<String, dynamic>>{};
+    if (raw == null) return out;
+
+    final dartified = (raw as JSObject).dartify();
+    if (dartified is! Map) return out;
+
+    dartified.forEach((key, value) {
+      if (key is String && value is Map) {
+        out[key] = {
+          'key': value['key'] as String? ?? '',
+          'value': value['value'],
+          'experimentId': value['experiment_id'] as String?,
+          'isExperimentActive': value['is_experiment_active'] as bool?,
+          'isQaTester': value['is_qa_tester'] as bool?,
+          'source': _jsSourceToMap(value),
+        };
+      }
+    });
+    return out;
+  }
+
+  Map<String, dynamic> _jsVariantToMap(JSAny? jsResult, Map<Object?, Object?> fallbackMap) {
+    Map<String, dynamic> fallback() => {
+          'key': fallbackMap['key'] as String? ?? '',
+          'value': fallbackMap['value'],
+          'experimentId': null,
+          'isExperimentActive': null,
+          'isQaTester': null,
+          'source': const {'kind': 'fallback'},
+        };
+
+    if (jsResult == null) {
+      debugPrint('[Mixpanel] _jsVariantToMap received null result, returning fallback');
+      return fallback();
+    }
+
+    // Convert JS object to Dart map
+    try {
+      Map<Object?, Object?>? dartMap = (jsResult as JSObject).dartify() as Map<Object?, Object?>?;
+      if (dartMap == null) {
+        debugPrint('[Mixpanel] _jsVariantToMap failed to convert JS object, returning fallback');
+        return fallback();
+      }
+
+      return {
+        'key': dartMap['key'] as String? ?? '',
+        'value': dartMap['value'],
+        'experimentId': dartMap['experiment_id'] as String?,
+        'isExperimentActive': dartMap['is_experiment_active'] as bool?,
+        'isQaTester': dartMap['is_qa_tester'] as bool?,
+        'source': _jsSourceToMap(dartMap),
+      };
+    } catch (e) {
+      debugPrint('[Mixpanel] _jsVariantToMap failed with error: $e, returning fallback');
+      return fallback();
+    }
+  }
+
+  /// Translates the web SDK's flat `variant_source` + `persisted_at_in_ms`
+  /// fields into the discriminated `{kind, persistedAtMillis?}` shape that the
+  /// Dart wrapper expects (and that the iOS/Android handlers produce). Defaults
+  /// to `{'kind': 'network'}` when `variant_source` is absent: at the time of
+  /// this release the Mixpanel JS SDK does not yet emit `variant_source`, so
+  /// every served variant lands here — treating them as network beats
+  /// mislabeling every successful fetch as a fallback. Sources will be
+  /// reported accurately once JS SDK support ships; check the Mixpanel JS
+  /// docs for availability.
+  Map<String, dynamic> _jsSourceToMap(Map<Object?, Object?> variant) {
+    final raw = variant['variant_source'];
+    if (raw == 'persistence') {
+      final atRaw = variant['persisted_at_in_ms'];
+      final atMs = atRaw is num ? atRaw.toInt() : null;
+      if (atMs == null) {
+        debugPrint('[Mixpanel] persistence variant missing persisted_at_in_ms, defaulting to fallback');
+        return {'kind': 'fallback'};
+      }
+      return {'kind': 'persistence', 'persistedAtMillis': atMs};
+    }
+    if (raw == 'fallback') {
+      return {'kind': 'fallback'};
+    }
+    // 'network', missing, or unknown.
+    return {'kind': 'network'};
+  }
+
+  /// Translates the Dart-side [VariantLookupPolicy] wire format into the
+  /// `flags.persistence` config shape the web SDK accepts. Returns `null` for
+  /// the default `networkOnly` policy so we don't bloat the config.
+  Map<String, dynamic>? _flagsPersistenceFromPolicy(dynamic policyMap) {
+    if (policyMap is! Map) return null;
+    final policy = policyMap['policy'];
+    if (policy == 'persistenceUntilNetworkSuccess' || policy == 'networkFirst') {
+      return {
+        'variantLookupPolicy': policy,
+        if (policyMap['persistenceTtlMillis'] is num)
+          'persistenceTtlMs': policyMap['persistenceTtlMillis'],
+      };
+    }
+    // 'networkOnly' (or unknown) — let the JS SDK use its default.
+    return null;
+  }
+}

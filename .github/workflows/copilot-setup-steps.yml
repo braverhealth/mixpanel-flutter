@@ -1,0 +1,85 @@
+name: "Copilot Setup Steps"
+
+# Automatically run the setup steps when they are changed to allow for easy validation
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+
+jobs:
+  # The job MUST be called `copilot-setup-steps` or it will not be picked up by Copilot.
+  copilot-setup-steps:
+    # macOS is required because the package's unit tests use `Platform.isMacOS`
+    # to select the iOS/macOS code path (lib/mixpanel_flutter.dart in append/
+    # union/remove). On Linux runners those tests fall into the Android branch
+    # and fail. Keep this in sync with flutter.yml's `test-main-code` job.
+    runs-on: macos-latest
+
+    # Set permissions based on project needs
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      # Keep flutter-version aligned with .github/workflows/flutter.yml so
+      # Copilot's environment matches what CI tests against.
+      - name: Set up Flutter
+        uses: ./.github/actions/setup-flutter
+        with:
+          flutter-version: "3.41.0"
+          channel: "stable"
+          cache: "true"
+
+      - name: Install Flutter dependencies
+        working-directory: packages/mixpanel_flutter
+        run: |
+          flutter --version
+          flutter pub get
+          cd example && flutter pub get
+
+      - name: Install session-replay Flutter dependencies
+        working-directory: packages/mixpanel_flutter_session_replay
+        run: |
+          flutter pub get
+          cd example && flutter pub get
+
+      - name: Set up Java for Android
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9  # v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Ruby for iOS tooling
+        uses: ruby/setup-ruby@319994f95fa847cf3fb3cd3dbe89f6dcde9f178f  # v1
+        with:
+          ruby-version: '3.0'
+          bundler-cache: true
+
+      - name: Install development tools
+        run: |
+          # Install dartdoc for documentation generation
+          dart pub global activate dartdoc
+          
+          # Install coverage tools
+          dart pub global activate coverage
+
+      - name: Run Flutter analyze
+        working-directory: packages/mixpanel_flutter
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Verify test setup
+        working-directory: packages/mixpanel_flutter
+        run: flutter test --no-pub
+
+      - name: Cache setup validation
+        run: |
+          echo "✓ Flutter SDK configured"
+          echo "✓ Dependencies installed" 
+          echo "✓ Analysis tools ready"
+          echo "✓ Test framework available"

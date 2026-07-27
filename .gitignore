@@ -6,3 +6,10 @@
 .idea
 build/
 .cxx
+local.properties
+*Pods
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved

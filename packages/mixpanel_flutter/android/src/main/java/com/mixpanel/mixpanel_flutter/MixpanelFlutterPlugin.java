@@ -1,0 +1,890 @@
+package com.mixpanel.mixpanel_flutter;
+
+import androidx.annotation.NonNull;
+
+import android.content.Context;
+
+import io.flutter.plugin.common.StandardMethodCodec;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+
+import io.flutter.embedding.engine.plugins.FlutterPlugin;
+import io.flutter.plugin.common.MethodCall;
+import io.flutter.plugin.common.MethodChannel;
+import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
+import io.flutter.plugin.common.MethodChannel.Result;
+
+import com.mixpanel.android.mpmetrics.FeatureFlagOptions;
+import com.mixpanel.android.mpmetrics.MixpanelAPI;
+import com.mixpanel.android.mpmetrics.MixpanelFlagVariant;
+import com.mixpanel.android.mpmetrics.MixpanelOptions;
+import com.mixpanel.android.mpmetrics.VariantLookupPolicy;
+
+/**
+ * MixpanelFlutterPlugin
+ */
+public class MixpanelFlutterPlugin implements FlutterPlugin, MethodCallHandler {
+
+    private MethodChannel channel;
+    private MixpanelAPI mixpanel;
+    private Context context;
+    private JSONObject mixpanelProperties;
+    private FlutterPluginBinding flutterPluginBinding;
+
+    private static final Map<String, Object> EMPTY_HASHMAP = new HashMap<>();
+
+    public MixpanelFlutterPlugin() {
+    }
+
+    public MixpanelFlutterPlugin(Context context) {
+        this.context = context;
+    }
+
+    @Override
+    public void onAttachedToEngine(@NonNull FlutterPluginBinding flutterPluginBinding) {
+        // Store references for lazy initialization to avoid ANR during plugin registration
+        this.flutterPluginBinding = flutterPluginBinding;
+        this.context = flutterPluginBinding.getApplicationContext();
+
+        initializeMethodChannel();
+    }
+
+    @Override
+    public void onMethodCall(@NonNull MethodCall call, @NonNull Result result) {
+        switch (call.method) {
+            case "initialize":
+                handleInitialize(call, result);
+                break;
+            case "setServerURL":
+                handleSetServerURL(call, result);
+                break;
+            case "setLoggingEnabled":
+                handleSetLoggingEnabled(call, result);
+                break;
+            case "setUseIpAddressForGeolocation":
+                handleSetUseIpAddressForGeolocation(call, result);
+                break;
+            case "hasOptedOutTracking":
+                handleHasOptedOutTracking(call, result);
+                break;
+            case "optInTracking":
+                handleOptInTracking(call, result);
+                break;
+            case "optOutTracking":
+                handleOptOutTracking(call, result);
+                break;
+            case "setFlushBatchSize":
+                handleSetFlushBatchSize(call, result);
+            case "identify":
+                handleIdentify(call, result);
+                break;
+            case "alias":
+                handleAlias(call, result);
+                break;
+            case "track":
+                handleTrack(call, result);
+                break;
+            case "trackWithGroups":
+                handleTrackWithGroups(call, result);
+                break;
+            case "setGroup":
+                handleSetGroup(call, result);
+                break;
+            case "addGroup":
+                handleAddGroup(call, result);
+                break;
+            case "removeGroup":
+                handleRemoveGroup(call, result);
+                break;
+            case "deleteGroup":
+                handleDeleteGroup(call, result);
+                break;
+            case "registerSuperProperties":
+                handleRegisterSuperProperties(call, result);
+                break;
+            case "registerSuperPropertiesOnce":
+                handleRegisterSuperPropertiesOnce(call, result);
+                break;
+            case "unregisterSuperProperty":
+                handleUnregisterSuperProperty(call, result);
+                break;
+            case "getSuperProperties":
+                handleGetSuperProperties(call, result);
+                break;
+            case "clearSuperProperties":
+                handleClearSuperProperties(call, result);
+                break;
+            case "timeEvent":
+                handleTimeEvent(call, result);
+                break;
+            case "eventElapsedTime":
+                handleEventElapsedTime(call, result);
+                break;
+            case "reset":
+                handleReset(call, result);
+                break;
+            case "getDistinctId":
+                handleGetDistinctId(call, result);
+                break;
+            case "flush":
+                handleFlush(call, result);
+                break;
+            case "set":
+                handleSet(call, result);
+                break;
+            case "setOnce":
+                handleSetOnce(call, result);
+                break;
+            case "increment":
+                handleIncrement(call, result);
+                break;
+            case "append":
+                handleAppend(call, result);
+                break;
+            case "union":
+                handleUnion(call, result);
+                break;
+            case "remove":
+                handleRemove(call, result);
+                break;
+            case "unset":
+                handleUnset(call, result);
+                break;
+            case "trackCharge":
+                handleTrackCharge(call, result);
+                break;
+            case "clearCharges":
+                handleClearCharges(call, result);
+                break;
+            case "deleteUser":
+                handleDeleteUser(call, result);
+                break;
+            case "groupSetProperties":
+                handleGroupSetProperties(call, result);
+                break;
+            case "groupSetPropertyOnce":
+                handleGroupSetPropertyOnce(call, result);
+                break;
+            case "groupUnsetProperty":
+                handleGroupUnsetProperty(call, result);
+                break;
+            case "groupRemovePropertyValue":
+                handleGroupRemovePropertyValue(call, result);
+                break;
+            case "groupUnionProperty":
+                handleGroupUnionProperty(call, result);
+                break;
+            case "areFlagsReady":
+                handleAreFlagsReady(call, result);
+                break;
+            case "getVariant":
+                handleGetVariant(call, result);
+                break;
+            case "getVariantValue":
+                handleGetVariantValue(call, result);
+                break;
+            case "isEnabled":
+                handleIsEnabled(call, result);
+                break;
+            case "updateFlagsContext":
+                handleUpdateFlagsContext(call, result);
+                break;
+            case "loadFlags":
+                handleLoadFlags(call, result);
+                break;
+            case "getAllVariants":
+                handleGetAllVariants(call, result);
+                break;
+            case "trackScreenView":
+                handleTrackScreenView(call, result);
+                break;
+            case "trackScreenLeave":
+                handleTrackScreenLeave(call, result);
+                break;
+            case "startEventBridge":
+                handleStartEventBridge(result);
+                break;
+            case "stopEventBridge":
+                handleStopEventBridge(result);
+                break;
+            default:
+                result.notImplemented();
+                break;
+        }
+    }
+
+    private void handleStartEventBridge(Result result) {
+        if (channel != null) {
+            EventBridgeSubscriber.start(channel);
+        }
+        result.success(null);
+    }
+
+    private void handleStopEventBridge(Result result) {
+        EventBridgeSubscriber.stop();
+        result.success(null);
+    }
+
+    private void initializeMethodChannel() {
+        if (channel == null && flutterPluginBinding != null) {
+            channel = new MethodChannel(flutterPluginBinding.getBinaryMessenger(), "mixpanel_flutter",
+                    new StandardMethodCodec(new MixpanelMessageCodec()));
+            channel.setMethodCallHandler(this);
+        }
+    }
+
+    private void handleInitialize(MethodCall call, Result result) {
+        final String token = call.argument("token");
+        if (token == null) {
+            throw new RuntimeException("Your Mixpanel Token was not set");
+        }
+        Map<String, Object> mixpanelPropertiesMap =
+                call.<HashMap<String, Object>>argument("mixpanelProperties");
+        mixpanelProperties =
+                new JSONObject(mixpanelPropertiesMap == null ? EMPTY_HASHMAP : mixpanelPropertiesMap);
+        Map<String, Object> superPropertiesMap =
+                call.<HashMap<String, Object>>argument("superProperties");
+        JSONObject superProperties =
+                new JSONObject(superPropertiesMap == null ? EMPTY_HASHMAP : superPropertiesMap);
+        JSONObject superAndMixpanelProperties;
+        try {
+            superAndMixpanelProperties =
+                    MixpanelFlutterHelper.getMergedProperties(superProperties, mixpanelProperties);
+        } catch (JSONException e) {
+            result.error("MixpanelFlutterException", e.getLocalizedMessage(), null);
+            return;
+        }
+
+        Boolean optOutTrackingDefault = call.<Boolean>argument("optOutTrackingDefault");
+        Boolean trackAutomaticEvents = call.<Boolean>argument("trackAutomaticEvents");
+        String serverURL = call.<String>argument("serverURL");
+
+        // Parse feature flags config if provided
+        Map<String, Object> featureFlagsMap = call.<HashMap<String, Object>>argument("featureFlags");
+        Boolean featureFlagsEnabled = null;
+        JSONObject featureFlagsContext = null;
+        VariantLookupPolicy variantLookupPolicy = null;
+        Boolean prefetchFlags = null;
+        if (featureFlagsMap != null) {
+            Object enabledValue = featureFlagsMap.get("enabled");
+            if (enabledValue instanceof Boolean) {
+                featureFlagsEnabled = (Boolean) enabledValue;
+            }
+            Object contextValue = featureFlagsMap.get("context");
+            if (contextValue instanceof Map) {
+                try {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> contextMap = (Map<String, Object>) contextValue;
+                    featureFlagsContext = new JSONObject(contextMap);
+                } catch (Exception e) {
+                    android.util.Log.w("Mixpanel", "Failed to parse feature flags context: " + e.getMessage());
+                }
+            }
+            Object policyValue = featureFlagsMap.get("variantLookupPolicy");
+            if (policyValue instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> policyMap = (Map<String, Object>) policyValue;
+                variantLookupPolicy = parseVariantLookupPolicy(policyMap);
+            }
+            Object prefetchValue = featureFlagsMap.get("prefetchFlags");
+            if (prefetchValue instanceof Boolean) {
+                prefetchFlags = (Boolean) prefetchValue;
+            }
+        }
+
+        // Build MixpanelOptions with feature flags configuration
+        MixpanelOptions.Builder optionsBuilder = new MixpanelOptions.Builder()
+                .optOutTrackingDefault(optOutTrackingDefault == null ? false : optOutTrackingDefault)
+                .superProperties(superAndMixpanelProperties);
+
+        if (serverURL != null && !serverURL.trim().isEmpty()) {
+            optionsBuilder.serverURL(serverURL);
+        }
+
+        if (featureFlagsEnabled != null && featureFlagsEnabled) {
+            FeatureFlagOptions.Builder ffBuilder = new FeatureFlagOptions.Builder().enabled(true);
+            if (featureFlagsContext != null) {
+                ffBuilder.context(featureFlagsContext);
+            }
+            if (variantLookupPolicy != null) {
+                ffBuilder.variantLookupPolicy(variantLookupPolicy);
+            }
+            if (prefetchFlags != null) {
+                ffBuilder.prefetchFlags(prefetchFlags);
+            }
+            optionsBuilder.featureFlagOptions(ffBuilder.build());
+        }
+
+        boolean trackAutoEvents = trackAutomaticEvents == null ? true : trackAutomaticEvents;
+        mixpanel = MixpanelAPI.getInstance(context, token, trackAutoEvents, optionsBuilder.build());
+
+        result.success(Integer.toString(mixpanel.hashCode()));
+    }
+
+    private void handleSetServerURL(MethodCall call, Result result) {
+        String serverURL = call.argument("serverURL");
+        mixpanel.setServerURL(serverURL);
+        result.success(null);
+    }
+
+    private void handleSetLoggingEnabled(MethodCall call, Result result) {
+        Boolean enableLogging = call.argument("loggingEnabled");
+        mixpanel.setEnableLogging(enableLogging);
+        result.success(null);
+    }
+
+    private void handleSetUseIpAddressForGeolocation(MethodCall call, Result result) {
+        Boolean useIpAddressForGeolocation = call.argument("useIpAddressForGeolocation");
+        mixpanel.setUseIpAddressForGeolocation(useIpAddressForGeolocation);
+        result.success(null);
+    }
+
+    private void handleHasOptedOutTracking(MethodCall call, Result result) {
+        result.success(mixpanel.hasOptedOutTracking());
+    }
+
+    private void handleOptInTracking(MethodCall call, Result result) {
+        mixpanel.optInTracking(null, mixpanelProperties);
+        result.success(null);
+    }
+
+    private void handleOptOutTracking(MethodCall call, Result result) {
+        mixpanel.optOutTracking();
+        result.success(null);
+    }
+
+    private void handleSetFlushBatchSize(MethodCall call, Result result) {
+        int flushBatchSize = call.argument("flushBatchSize");
+        mixpanel.setFlushBatchSize(flushBatchSize);
+        result.success(null);
+    }
+
+    private void handleIdentify(MethodCall call, Result result) {
+        String distinctId = call.argument("distinctId");
+        mixpanel.identify(distinctId);
+        result.success(null);
+    }
+
+    private void handleAlias(MethodCall call, Result result) {
+        String distinctId = call.argument("distinctId");
+        String alias = call.argument("alias");
+        mixpanel.alias(alias, distinctId);
+        result.success(null);
+    }
+
+    private void handleTrack(MethodCall call, Result result) {
+        String eventName = call.argument("eventName");
+        Map<String, Object> mapProperties = call.<HashMap<String, Object>>argument("properties");
+        JSONObject properties;
+        try {
+            properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : mapProperties);
+            properties = MixpanelFlutterHelper.getMergedProperties(properties, mixpanelProperties);
+        } catch (JSONException e) {
+            result.error("MixpanelFlutterException", e.getLocalizedMessage(), null);
+            return;
+        }
+        mixpanel.track(eventName, properties);
+        result.success(null);
+    }
+
+    private void handleTrackScreenView(MethodCall call, Result result) {
+        String screenName = call.argument("screenName");
+        Map<String, Object> mapProperties = call.<HashMap<String, Object>>argument("properties");
+        JSONObject properties;
+        try {
+            properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : mapProperties);
+            properties = MixpanelFlutterHelper.getMergedProperties(properties, mixpanelProperties);
+        } catch (JSONException e) {
+            result.error("MixpanelFlutterException", e.getLocalizedMessage(), null);
+            return;
+        }
+        if (mixpanel.getAutocapture() != null) {
+            mixpanel.getAutocapture().trackScreenView(screenName, properties);
+        }
+        result.success(null);
+    }
+
+    private void handleTrackScreenLeave(MethodCall call, Result result) {
+        String screenName = call.argument("screenName");
+        Map<String, Object> mapProperties = call.<HashMap<String, Object>>argument("properties");
+        JSONObject properties;
+        try {
+            properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : mapProperties);
+            properties = MixpanelFlutterHelper.getMergedProperties(properties, mixpanelProperties);
+        } catch (JSONException e) {
+            result.error("MixpanelFlutterException", e.getLocalizedMessage(), null);
+            return;
+        }
+        if (mixpanel.getAutocapture() != null) {
+            mixpanel.getAutocapture().trackScreenLeave(screenName, properties);
+        }
+        result.success(null);
+    }
+
+    private void handleRegisterSuperProperties(MethodCall call, Result result) {
+        Map<String, Object> mapProperties = call.<HashMap<String, Object>>argument("properties");
+        JSONObject properties;
+        try {
+            properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : mapProperties);
+            properties = MixpanelFlutterHelper.getMergedProperties(properties, mixpanelProperties);
+        } catch (JSONException e) {
+            result.error("MixpanelFlutterException", e.getLocalizedMessage(), null);
+            return;
+        }
+        mixpanel.registerSuperProperties(properties);
+        result.success(null);
+    }
+
+    private void handleRegisterSuperPropertiesOnce(MethodCall call, Result result) {
+        Map<String, Object> mapProperties = call.<HashMap<String, Object>>argument("properties");
+        JSONObject properties;
+        try {
+            properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : mapProperties);
+            properties = MixpanelFlutterHelper.getMergedProperties(properties, mixpanelProperties);
+        } catch (JSONException e) {
+            result.error("MixpanelFlutterException", e.getLocalizedMessage(), null);
+            return;
+        }
+        mixpanel.registerSuperPropertiesOnce(properties);
+        result.success(null);
+    }
+
+    private void handleUnregisterSuperProperty(MethodCall call, Result result) {
+        String propertyName = call.argument("propertyName");
+        mixpanel.unregisterSuperProperty(propertyName);
+        result.success(null);
+    }
+
+    private void handleUnion(MethodCall call, Result result) {
+        String name = call.argument("name");
+        ArrayList<Object> value = call.argument("value");
+        mixpanel.getPeople().union(name, new JSONArray(value));
+        result.success(null);
+    }
+
+    private void handleGetSuperProperties(MethodCall call, Result result) {
+        try {
+            result.success(MixpanelFlutterHelper.toMap(mixpanel.getSuperProperties()));
+        } catch (JSONException e) {
+            result.error("MixpanelFlutterException", e.getLocalizedMessage(), null);
+            result.success(null);
+        }
+    }
+
+    private void handleClearSuperProperties(MethodCall call, Result result) {
+        mixpanel.clearSuperProperties();
+        result.success(null);
+    }
+
+    private void handleTimeEvent(MethodCall call, Result result) {
+        String eventName = call.argument("eventName");
+        mixpanel.timeEvent(eventName);
+        result.success(null);
+    }
+
+    private void handleEventElapsedTime(MethodCall call, Result result) {
+        String eventName = call.argument("eventName");
+        result.success(mixpanel.eventElapsedTime(eventName));
+    }
+
+    private void handleReset(MethodCall call, Result result) {
+        mixpanel.reset();
+        result.success(null);
+    }
+
+    private void handleGetDistinctId(MethodCall call, Result result) {
+        result.success(mixpanel.getDistinctId());
+    }
+
+    private void handleFlush(MethodCall call, Result result) {
+        mixpanel.flush();
+        result.success(null);
+    }
+
+    private void handleSet(MethodCall call, Result result) {
+        Map<String, Object> mapProperties = call.<HashMap<String, Object>>argument("properties");
+        JSONObject properties;
+        try {
+            properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : mapProperties);
+            properties = MixpanelFlutterHelper.getMergedProperties(properties, mixpanelProperties);
+        } catch (JSONException e) {
+            result.error("MixpanelFlutterException", e.getLocalizedMessage(), null);
+            return;
+        }
+        mixpanel.getPeople().set(properties);
+        result.success(null);
+    }
+
+    private void handleUnset(MethodCall call, Result result) {
+        String propertyName = call.argument("name");
+        mixpanel.getPeople().unset(propertyName);
+        result.success(null);
+    }
+
+    private void handleSetOnce(MethodCall call, Result result) {
+        Map<String, Object> mapProperties = call.<HashMap<String, Object>>argument("properties");
+        JSONObject properties;
+        try {
+            properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : mapProperties);
+            properties = MixpanelFlutterHelper.getMergedProperties(properties, mixpanelProperties);
+        } catch (JSONException e) {
+            result.error("MixpanelFlutterException", e.getLocalizedMessage(), null);
+            return;
+        }
+        mixpanel.getPeople().setOnce(properties);
+        result.success(null);
+    }
+
+    private void handleTrackCharge(MethodCall call, Result result) {
+        double charge = call.argument("amount");
+        Map<String, Object> mapProperties = call.<HashMap<String, Object>>argument("properties");
+        JSONObject properties;
+        try {
+            properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : mapProperties);
+            properties = MixpanelFlutterHelper.getMergedProperties(properties, mixpanelProperties);
+        } catch (JSONException e) {
+            result.error("MixpanelFlutterException", e.getLocalizedMessage(), null);
+            return;
+        }
+        mixpanel.getPeople().trackCharge(charge, properties);
+        result.success(null);
+    }
+
+    private void handleClearCharges(MethodCall call, Result result) {
+        mixpanel.getPeople().clearCharges();
+        result.success(null);
+    }
+
+    private void handleIncrement(MethodCall call, Result result) {
+        Map<String, Number> properties = call.<HashMap<String, Number>>argument("properties");
+        mixpanel.getPeople().increment(properties);
+        result.success(null);
+    }
+
+    private void handleAppend(MethodCall call, Result result) {
+        String name = call.argument("name");
+        Object value = call.argument("value");
+        mixpanel.getPeople().append(name, value);
+        result.success(null);
+    }
+
+    private void handleDeleteUser(MethodCall call, Result result) {
+        mixpanel.getPeople().deleteUser();
+        result.success(null);
+    }
+
+    private void handleRemove(MethodCall call, Result result) {
+        String name = call.argument("name");
+        Object value = call.argument("value");
+        mixpanel.getPeople().remove(name, value);
+        result.success(null);
+    }
+
+    private void handleTrackWithGroups(MethodCall call, Result result) {
+        String eventName = call.argument("eventName");
+        Map<String, Object> eventProperties = call.<HashMap<String, Object>>argument("properties");
+        Map<String, Object> eventGroups = call.<HashMap<String, Object>>argument("groups");
+        mixpanel.trackWithGroups(eventName, eventProperties, eventGroups);
+        result.success(null);
+    }
+
+    private void handleSetGroup(MethodCall call, Result result) {
+        String groupKey = call.argument("groupKey");
+        Object groupID = call.argument("groupID");
+        mixpanel.setGroup(groupKey, groupID);
+        result.success(null);
+    }
+
+    private void handleAddGroup(MethodCall call, Result result) {
+        String groupKey = call.argument("groupKey");
+        Object groupID = call.argument("groupID");
+        mixpanel.addGroup(groupKey, groupID);
+        result.success(null);
+    }
+
+    private void handleRemoveGroup(MethodCall call, Result result) {
+        String groupKey = call.argument("groupKey");
+        Object groupID = call.argument("groupID");
+        mixpanel.removeGroup(groupKey, groupID);
+        result.success(null);
+    }
+
+    private void handleDeleteGroup(MethodCall call, Result result) {
+        String groupKey = call.argument("groupKey");
+        Object groupID = call.argument("groupID");
+        mixpanel.getGroup(groupKey, groupID).deleteGroup();
+        result.success(null);
+    }
+
+    private void handleGroupSetProperties(MethodCall call, Result result) {
+        String groupKey = call.argument("groupKey");
+        Object groupID = call.argument("groupID");
+        Map<String, Object> mapProperties = call.<HashMap<String, Object>>argument("properties");
+        JSONObject properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : mapProperties);
+        mixpanel.getGroup(groupKey, groupID).set(properties);
+        result.success(null);
+    }
+
+    private void handleGroupSetPropertyOnce(MethodCall call, Result result) {
+        String groupKey = call.argument("groupKey");
+        Object groupID = call.argument("groupID");
+        Map<String, Object> mapProperties = call.<HashMap<String, Object>>argument("properties");
+        JSONObject properties = new JSONObject(mapProperties == null ? EMPTY_HASHMAP : mapProperties);
+        mixpanel.getGroup(groupKey, groupID).setOnce(properties);
+        result.success(null);
+    }
+
+    private void handleGroupUnsetProperty(MethodCall call, Result result) {
+        String groupKey = call.argument("groupKey");
+        Object groupID = call.argument("groupID");
+        String propertyName = call.argument("propertyName");
+        mixpanel.getGroup(groupKey, groupID).unset(propertyName);
+        result.success(null);
+    }
+
+    private void handleGroupRemovePropertyValue(MethodCall call, Result result) {
+        String groupKey = call.argument("groupKey");
+        Object groupID = call.argument("groupID");
+        String name = call.argument("name");
+        Object value = call.argument("value");
+        mixpanel.getGroup(groupKey, groupID).remove(name, value);
+        result.success(null);
+    }
+
+    private void handleGroupUnionProperty(MethodCall call, Result result) {
+        String groupKey = call.argument("groupKey");
+        Object groupID = call.argument("groupID");
+        String name = call.argument("name");
+        ArrayList<Object> value = call.argument("value");
+        mixpanel.getGroup(groupKey, groupID).union(name, new JSONArray(value));
+        result.success(null);
+    }
+
+    // Feature Flags handlers
+
+    private void handleAreFlagsReady(MethodCall call, Result result) {
+        if (mixpanel == null) {
+            android.util.Log.w("Mixpanel", "areFlagsReady called before Mixpanel was initialized, returning false");
+            result.success(false);
+            return;
+        }
+        result.success(mixpanel.getFlags().areFlagsReady());
+    }
+
+    private void handleGetVariant(MethodCall call, Result result) {
+        String flagName = call.argument("flagName");
+        Map<String, Object> fallbackMap = call.<HashMap<String, Object>>argument("fallback");
+        com.mixpanel.android.mpmetrics.MixpanelFlagVariant fallback = mapToFlagVariant(fallbackMap);
+        if (mixpanel == null) {
+            android.util.Log.w("Mixpanel", "getVariant called before Mixpanel was initialized, returning fallback");
+            result.success(flagVariantToMap(fallback));
+            return;
+        }
+        if (flagName == null || flagName.isEmpty()) {
+            android.util.Log.w("Mixpanel", "getVariant called with empty flagName, returning fallback");
+            result.success(flagVariantToMap(fallback));
+            return;
+        }
+        mixpanel.getFlags().getVariant(flagName, fallback, variant -> {
+            result.success(flagVariantToMap(variant));
+        });
+    }
+
+    private void handleGetVariantValue(MethodCall call, Result result) {
+        String flagName = call.argument("flagName");
+        Object fallbackValue = call.argument("fallbackValue");
+        if (mixpanel == null) {
+            android.util.Log.w("Mixpanel", "getVariantValue called before Mixpanel was initialized, returning fallback");
+            result.success(fallbackValue);
+            return;
+        }
+        if (flagName == null || flagName.isEmpty()) {
+            android.util.Log.w("Mixpanel", "getVariantValue called with empty flagName, returning fallback");
+            result.success(fallbackValue);
+            return;
+        }
+        mixpanel.getFlags().getVariant(flagName, new com.mixpanel.android.mpmetrics.MixpanelFlagVariant(flagName, fallbackValue), variant -> {
+            result.success(variant.value);
+        });
+    }
+
+    private void handleIsEnabled(MethodCall call, Result result) {
+        String flagName = call.argument("flagName");
+        Boolean fallbackValue = call.argument("fallbackValue");
+        boolean safeFallback = fallbackValue != null ? fallbackValue : false;
+        if (mixpanel == null) {
+            android.util.Log.w("Mixpanel", "isEnabled called before Mixpanel was initialized, returning fallback");
+            result.success(safeFallback);
+            return;
+        }
+        if (flagName == null || flagName.isEmpty()) {
+            android.util.Log.w("Mixpanel", "isEnabled called with empty flagName, returning fallback");
+            result.success(safeFallback);
+            return;
+        }
+        mixpanel.getFlags().getVariant(flagName, new com.mixpanel.android.mpmetrics.MixpanelFlagVariant(flagName, safeFallback), variant -> {
+            Object value = variant.value;
+            if (value instanceof Boolean) {
+                result.success(value);
+            } else {
+                if (value != null) {
+                    android.util.Log.w("Mixpanel", "isEnabled flag '" + flagName + "' has non-boolean value of type " + value.getClass().getSimpleName() + ", returning fallback");
+                }
+                result.success(safeFallback);
+            }
+        });
+    }
+
+    private void handleUpdateFlagsContext(MethodCall call, Result result) {
+        if (mixpanel == null) {
+            android.util.Log.w("Mixpanel", "updateFlagsContext called before Mixpanel was initialized");
+            result.success(null);
+            return;
+        }
+        Map<String, Object> contextMap = call.<HashMap<String, Object>>argument("context");
+        if (contextMap == null) {
+            contextMap = new HashMap<>();
+        }
+        mixpanel.getFlags().setContext(contextMap, success -> {
+            result.success(null);
+        });
+    }
+
+    private void handleLoadFlags(MethodCall call, Result result) {
+        if (mixpanel == null) {
+            android.util.Log.w("Mixpanel", "loadFlags called before Mixpanel was initialized");
+            result.error("LOAD_FLAGS_FAILED", "loadFlags called before Mixpanel was initialized", null);
+            return;
+        }
+        mixpanel.getFlags().loadFlags(success -> {
+            if (success) {
+                result.success(null);
+            } else {
+                result.error("LOAD_FLAGS_FAILED", "Failed to load feature flags", null);
+            }
+        });
+    }
+
+    private void handleGetAllVariants(MethodCall call, Result result) {
+        if (mixpanel == null) {
+            android.util.Log.w("Mixpanel", "getAllVariants called before Mixpanel was initialized");
+            result.error("MIXPANEL_UNINITIALIZED", "getAllVariants called before Mixpanel was initialized", null);
+            return;
+        }
+        mixpanel.getFlags().getAllVariants(variants -> {
+            Map<String, Map<String, Object>> out = new HashMap<>();
+            for (Map.Entry<String, com.mixpanel.android.mpmetrics.MixpanelFlagVariant> entry : variants.entrySet()) {
+                out.put(entry.getKey(), flagVariantToMap(entry.getValue()));
+            }
+            result.success(out);
+        });
+    }
+
+    private MixpanelFlagVariant mapToFlagVariant(Map<String, Object> map) {
+        if (map == null) {
+            return new MixpanelFlagVariant("", null);
+        }
+        String key = (String) map.get("key");
+        Object value = map.get("value");
+        return new MixpanelFlagVariant(key != null ? key : "", value);
+    }
+
+    private Map<String, Object> flagVariantToMap(MixpanelFlagVariant variant) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("key", variant.key);
+        map.put("value", variant.value);
+        map.put("experimentId", variant.experimentID);
+        map.put("isExperimentActive", variant.isExperimentActive);
+        map.put("isQaTester", variant.isQATester);
+        map.put("source", flagVariantSourceToMap(variant.source));
+        return map;
+    }
+
+    private Map<String, Object> flagVariantSourceToMap(MixpanelFlagVariant.Source source) {
+        // Native source is non-null on every variant the SDK returns. Defensive
+        // null-check kept in case the bridge runs against an older native build
+        // that still allowed null sources.
+        if (source == null) {
+            return null;
+        }
+        Map<String, Object> map = new HashMap<>();
+        if (source instanceof MixpanelFlagVariant.Source.Persistence) {
+            map.put("kind", "persistence");
+            map.put("persistedAtMillis", ((MixpanelFlagVariant.Source.Persistence) source).persistedAtMillis);
+        } else if (source instanceof MixpanelFlagVariant.Source.Network) {
+            map.put("kind", "network");
+        } else if (source instanceof MixpanelFlagVariant.Source.Fallback) {
+            map.put("kind", "fallback");
+            map.put("reason", fallbackReasonToString(((MixpanelFlagVariant.Source.Fallback) source).reason));
+        } else {
+            // Defensive fallback for unknown source types
+            map.put("kind", "fallback");
+            map.put("reason", "flagNotFound");
+        }
+        return map;
+    }
+
+    private String fallbackReasonToString(MixpanelFlagVariant.Source.Fallback.Reason reason) {
+        if (reason == null) {
+            return "flagNotFound"; // safe default
+        }
+        switch (reason) {
+            case NOT_READY:
+                return "notReady";
+            case FLAG_NOT_FOUND:
+                return "flagNotFound";
+            case BACKEND_ERROR:
+                return "backendError";
+            default:
+                return "flagNotFound";
+        }
+    }
+
+    private VariantLookupPolicy parseVariantLookupPolicy(Map<String, Object> policyMap) {
+        Object kind = policyMap.get("policy");
+        if (!(kind instanceof String)) {
+            return null;
+        }
+        switch ((String) kind) {
+            case "networkOnly":
+                return VariantLookupPolicy.networkOnly();
+            case "persistenceUntilNetworkSuccess":
+                return VariantLookupPolicy.persistenceUntilNetworkSuccess(readPersistenceTtlMillis(policyMap));
+            case "networkFirst":
+                return VariantLookupPolicy.networkFirst(readPersistenceTtlMillis(policyMap));
+            default:
+                android.util.Log.w("Mixpanel", "Unknown variantLookupPolicy '" + kind + "', falling back to networkOnly");
+                return VariantLookupPolicy.networkOnly();
+        }
+    }
+
+    private long readPersistenceTtlMillis(Map<String, Object> policyMap) {
+        Object raw = policyMap.get("persistenceTtlMillis");
+        if (raw instanceof Number) {
+            return ((Number) raw).longValue();
+        }
+        // Match the Dart-side default (24 hours). Should never hit this path in
+        // practice — the Dart layer always serializes persistenceTtlMillis for
+        // non-networkOnly policies — but keep the constant in sync to stay safe.
+        return java.util.concurrent.TimeUnit.HOURS.toMillis(24);
+    }
+
+    @Override
+    public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {
+        EventBridgeSubscriber.stop();
+        if (channel != null) {
+            channel.setMethodCallHandler(null);
+            channel = null;
+        }
+        flutterPluginBinding = null;
+        context = null;
+        mixpanel = null;
+        mixpanelProperties = null;
+    }
+}
